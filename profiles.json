@@ -1,0 +1,160 @@
+
+{
+  "default": "kr",
+  "globals": {
+    "headless": false,
+
+    "width": 1000,
+    "height": 1000,
+
+    "enableMemReport": true,
+    "memReportIntervalMs": 30000,
+
+    "baseChromeArgs": [
+      "--disable-dev-shm-usage",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-infobars",
+      "--start-maximized"
+    ],
+
+    "ui": {
+      "defaultViewportNull": true
+    },
+
+    "mobile": {
+      "enabled": true,
+      "viewport": {
+        "width": 1000,
+        "height": 1000,
+        "deviceScaleFactor": 2,
+        "isMobile": true,
+        "hasTouch": true,
+        "isLandscape": false
+      },
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+    }
+  },
+  "profiles": {
+    "kr": {
+      "locale": "ko-KR",
+      "timezone": "Asia/Seoul",
+      "acceptLanguage": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+      "chromeArgs": ["--lang=ko-KR"]
+    },
+    "en": {
+      "locale": "en-US",
+      "timezone": "America/Los_Angeles",
+      "acceptLanguage": "en-US,en;q=0.9",
+      "chromeArgs": ["--lang=en-US"]
+    },
+    "uk": {
+      "locale": "en-GB",
+      "timezone": "Europe/London",
+      "acceptLanguage": "en-GB,en;q=0.9",
+      "chromeArgs": ["--lang=en-GB"]
+    },
+    "jp": {
+      "locale": "ja-JP",
+      "timezone": "Asia/Tokyo",
+      "acceptLanguage": "ja-JP,ja;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=ja-JP"]
+    },
+    "cn": {
+      "locale": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "acceptLanguage": "zh-CN,zh;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=zh-CN"]
+    },
+    "tw": {
+      "locale": "zh-TW",
+      "timezone": "Asia/Taipei",
+      "acceptLanguage": "zh-TW,zh;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=zh-TW"]
+    },
+    "hk": {
+      "locale": "zh-HK",
+      "timezone": "Asia/Hong_Kong",
+      "acceptLanguage": "zh-HK,zh;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=zh-HK"]
+    },
+    "de": {
+      "locale": "de-DE",
+      "timezone": "Europe/Berlin",
+      "acceptLanguage": "de-DE,de;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=de-DE"]
+    },
+    "fr": {
+      "locale": "fr-FR",
+      "timezone": "Europe/Paris",
+      "acceptLanguage": "fr-FR,fr;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=fr-FR"]
+    },
+    "es": {
+      "locale": "es-ES",
+      "timezone": "Europe/Madrid",
+      "acceptLanguage": "es-ES,es;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=es-ES"]
+    },
+    "it": {
+      "locale": "it-IT",
+      "timezone": "Europe/Rome",
+      "acceptLanguage": "it-IT,it;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=it-IT"]
+    },
+    "nl": {
+      "locale": "nl-NL",
+      "timezone": "Europe/Amsterdam",
+      "acceptLanguage": "nl-NL,nl;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=nl-NL"]
+    },
+    "ru": {
+      "locale": "ru-RU",
+      "timezone": "Europe/Moscow",
+      "acceptLanguage": "ru-RU,ru;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=ru-RU"]
+    },
+    "pt": {
+      "locale": "pt-PT",
+      "timezone": "Europe/Lisbon",
+      "acceptLanguage": "pt-PT,pt;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=pt-PT"]
+    },
+    "br": {
+      "locale": "pt-BR",
+      "timezone": "America/Sao_Paulo",
+      "acceptLanguage": "pt-BR,pt;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=pt-BR"]
+    },
+    "in": {
+      "locale": "hi-IN",
+      "timezone": "Asia/Kolkata",
+      "acceptLanguage": "hi-IN,hi;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=hi-IN"]
+    },
+    "id": {
+      "locale": "id-ID",
+      "timezone": "Asia/Jakarta",
+      "acceptLanguage": "id-ID,id;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=id-ID"]
+    },
+    "th": {
+      "locale": "th-TH",
+      "timezone": "Asia/Bangkok",
+      "acceptLanguage": "th-TH,th;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=th-TH"]
+    },
+    "vn": {
+      "locale": "vi-VN",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "acceptLanguage": "vi-VN,vi;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=vi-VN"]
+    },
+    "tr": {
+      "locale": "tr-TR",
+      "timezone": "Europe/Istanbul",
+      "acceptLanguage": "tr-TR,tr;q=0.9,en-US;q=0.7,en;q=0.6",
+      "chromeArgs": ["--lang=tr-TR"]
+    }
+  }
+}
