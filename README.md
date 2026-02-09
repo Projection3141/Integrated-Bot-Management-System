@@ -22,4 +22,4 @@ npm init -y
 npm i puppeteer
 
 # 아래 파일 3개 생성 후 실행
-node .\test.js
+node app.js

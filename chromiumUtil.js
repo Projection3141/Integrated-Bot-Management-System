@@ -167,8 +167,8 @@ function pickDefaultsFromGlobals() {
   const g = getGlobals();
   return {
     headless: typeof g.headless === "boolean" ? g.headless : false,
-    width: Number.isFinite(g.width) ? g.width : 1200,
-    height: Number.isFinite(g.height) ? g.height : 1000,
+    width: Number.isFinite(g.width) ? g.width : 1600,
+    height: Number.isFinite(g.height) ? g.height : 1500,
     enableMemReport: typeof g.enableMemReport === "boolean" ? g.enableMemReport : true,
     memReportIntervalMs: Number.isFinite(g.memReportIntervalMs) ? g.memReportIntervalMs : 30000,
     ui: g.ui && typeof g.ui === "object" ? g.ui : {},

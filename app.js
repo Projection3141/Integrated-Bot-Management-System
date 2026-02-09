@@ -24,11 +24,18 @@ const DC_PW = "property5596!!";
 
   await enterGallary(page, "트릭컬");
 
-  // await crawl(page, "메이드", { limit: 10, outDir: "./out" });
+  await crawl(page, {
+    tab: "전체",
+    date: "26. 02.09~26. 02.09",
+    recommend: false,
+    keyword: "볼",
+    amount: 20,
+    outDir: "./out",
+  });
 
-  await gotoUrl(page, "https://m.dcinside.com/board/rollthechess/2980147?headid=40");
+  // await gotoUrl(page, "https://m.dcinside.com/board/rollthechess/2982674");
 
-  await comment(page, "맛있다");
+  // await comment(page, "진짜 말 안듣게 생겼네");
 
   await sleep(600000);
   await closeAll();

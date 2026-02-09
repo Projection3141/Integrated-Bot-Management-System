@@ -1,6 +1,3 @@
-/* ============================================================
-FILE: a.js
-============================================================ */
 
 const fs = require("fs");
 const path = require("path");
@@ -35,6 +32,155 @@ async function setValue(page, selector, value) {
 }
 
 /** ------------------------------------------------------------
+ * URL helpers
+ * ----------------------------------------------------------- */
+/**
+ * @param {string} href
+ * @returns {URL}
+ */
+function toURL(href) {
+  return new URL(href);
+}
+
+/**
+ * @param {URL} u
+ * @returns {string}
+ */
+function toHref(u) {
+  return u.toString();
+}
+
+/**
+ * query param set/remove
+ * - value가 null/undefined면 삭제
+ */
+function setParam(u, key, value) {
+  if (value === null || value === undefined || value === "") u.searchParams.delete(key);
+  else u.searchParams.set(key, String(value));
+  return u;
+}
+
+/** ------------------------------------------------------------
+ * Date helpers (YY.MM.DD / time-only "HH:MM")
+ * ----------------------------------------------------------- */
+/**
+ * "25. 07.20~26. 02.06" 같은 문자열을 [startDate,endDate] 로 파싱
+ * - inclusive range
+ * - YY는 2000+YY로 해석
+ */
+function parseRange(rangeStr) {
+  if (!rangeStr) return null;
+
+  const cleaned = String(rangeStr)
+    .replace(/\s+/g, "")
+    .replace(/[^\d.~]/g, ""); // 콤마 등 제거
+
+  const parts = cleaned.split("~");
+  if (parts.length !== 2) throw new Error(`date range format invalid: ${rangeStr}`);
+
+  const start = parseYYMMDD(parts[0]);
+  const end = parseYYMMDD(parts[1]);
+  if (!start || !end) throw new Error(`date range parse failed: ${rangeStr}`);
+
+  if (start.getTime() > end.getTime()) return { start: end, end: start };
+  return { start, end };
+}
+
+/** "KST 자정" Date 생성 */
+function kstMidnight(yyyy, mm, dd) {
+  const utcMs = Date.UTC(yyyy, mm - 1, dd, 0, 0, 0, 0) - 9 * 60 * 60 * 1000;
+  return new Date(utcMs);
+}
+
+function formatKST_YYYY_MM_DD(d) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** KST y/m/d 추출 */
+function getKSTYMD(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+
+  const y = Number(parts.find((p) => p.type === "year")?.value);
+  const m = Number(parts.find((p) => p.type === "month")?.value);
+  const d = Number(parts.find((p) => p.type === "day")?.value);
+  return { y, m, d };
+}
+
+function parseYYMMDD(s) {
+  const m = String(s).match(/^(\d{2})\.(\d{2})\.(\d{2})$/);
+  if (!m) return null;
+  const yyyy = 2000 + Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  return kstMidnight(yyyy, mm, dd);
+}
+
+/**
+ * 디시 dateTime 문자열을 KST 기준 Date(자정)으로 변환
+ * 지원:
+ *  - "HH:MM"                 => KST 오늘
+ *  - "YY.MM.DD"              => 해당 날짜
+ *  - "YY. MM.DD"             => 공백 제거 후 처리
+ *  - "YYYY.MM.DD"            => 해당 날짜
+ *  - "MM.DD" (연도 없음)     => KST 현재 연도 가정
+ *  - 끝에 "." / 기타 문자    => 정리 후 처리
+ */
+function toPostDate(dateTimeRaw, now = new Date()) {
+  const raw = String(dateTimeRaw || "").trim();
+  if (!raw) return null;
+
+  const s = raw.replace(/\s+/g, "").replace(/[^\d.:]/g, ""); // 숫자, 점, 콜론만 남김
+  if (!s) return null;
+
+  // time-only "HH:MM"
+  if (/^\d{2}:\d{2}$/.test(s)) {
+    const { y, m, d } = getKSTYMD(now);
+    return kstMidnight(y, m, d);
+  }
+
+  // YYYY.MM.DD
+  let m4 = s.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+  if (m4) {
+    const yyyy = Number(m4[1]);
+    const mm = Number(m4[2]);
+    const dd = Number(m4[3]);
+    return kstMidnight(yyyy, mm, dd);
+  }
+
+  // YY.MM.DD
+  let m2 = s.match(/^(\d{2})\.(\d{2})\.(\d{2})$/);
+  if (m2) {
+    const yyyy = 2000 + Number(m2[1]);
+    const mm = Number(m2[2]);
+    const dd = Number(m2[3]);
+    return kstMidnight(yyyy, mm, dd);
+  }
+
+  // MM.DD (연도 없음)
+  let md = s.match(/^(\d{2})\.(\d{2})$/);
+  if (md) {
+    const { y } = getKSTYMD(now);
+    const mm = Number(md[1]);
+    const dd = Number(md[2]);
+    return kstMidnight(y, mm, dd);
+  }
+
+  return null;
+}
+
+/** ------------------------------------------------------------
  * internal: naver search flow
  * ----------------------------------------------------------- */
 async function naverSearchWithGivenInput(page, query) {
@@ -49,7 +195,7 @@ async function naverSearchWithGivenInput(page, query) {
   await page.keyboard.type(query, { delay: 30 });
   await page.keyboard.press("Enter");
 
-  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => { });
 }
 
 async function clickFirstDcinsideResult(page, browser) {
@@ -64,7 +210,7 @@ async function clickFirstDcinsideResult(page, browser) {
       try {
         const p = await t.page();
         if (p) resolve(p);
-      } catch (_) {}
+      } catch (_) { }
     });
   }).catch(() => null);
 
@@ -169,7 +315,7 @@ async function login(page, { id, pw } = {}) {
     }, targetHref);
 
     if (clicked) {
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => { });
     }
   }
 }
@@ -207,7 +353,7 @@ async function search(page, keyword) {
       const form = input?.closest("form");
       if (form && typeof form.submit === "function") form.submit();
     }, searchAllInputSel);
-    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => { });
   }
 
   await sleep(200);
@@ -258,103 +404,265 @@ async function enterGallary(page, keyword) {
   return targetPage;
 }
 
+/** ------------------------------------------------------------
+ * crwal() 관련 URL 조작 함수
+ * ----------------------------------------------------------- */
 /**
- * crawl(page, keyword, opts)
- * - 현재 페이지(게시글 리스트 화면)에서 keyword가 포함된 "게시글"을 최대 limit개 추출
- * - 결과를 JSON으로 저장(fs)
- *
- * @param {import("puppeteer").Page} page
- * @param {string} keyword
- * @param {object} [opts]
- * @param {number} [opts.limit=10]
- * @param {string} [opts.outDir="./out"]
- * @param {string} [opts.fileName] - 미지정 시 timestamp 기반 자동 생성
- * @returns {Promise<{filePath:string, items:Array}>}
+ * selectRecommend()
+ * - 현재 URL에 recommend=1 세팅
  */
-async function crawl(page, keyword, opts = {}) {
+async function selectRecommend(page) {
+  if (!page) throw new Error("selectRecommend: page is required");
+
+  const u = toURL(page.url());
+  setParam(u, "recommend", 1);
+
+  /** 기존과 동일 URL이면 skip */
+  const next = toHref(u);
+  if (next === page.url()) return page;
+
+  await gotoUrl(page, next, { waitUntil: "domcontentloaded" });
+
+  return page;
+}
+
+/**
+ * selectTab(tabStr)
+ * - tabStr 매핑: '전체' => null(파라미터 제거), '일반' => 0
+ * - 이미 ?headid=가 있으면 값만 변경
+ * - recommend=1 있으면 &로 붙이는 건 URLSearchParams가 자동 처리
+ */
+async function selectTab(page, tabStr) {
+  if (!page) throw new Error("selectTab: page is required");
+
+  const map = {
+    전체: null,
+    일반: 0,
+  };
+
+  const tabNum = Object.prototype.hasOwnProperty.call(map, tabStr) ? map[tabStr] : tabStr;
+
+  const u = toURL(page.url());
+  setParam(u, "headid", tabNum);
+
+  const next = toHref(u);
+  if (next === page.url()) return page;
+
+  await gotoUrl(page, next, { waitUntil: "domcontentloaded" });
+  return page;
+}
+
+/**
+ * movePage(pageNum)
+ * - 현재 URL에서 page 파라미터만 조절
+ * - recommend/headid 존재 시에도 자연스럽게 &로 연결 (URLSearchParams)
+ */
+async function movePage(page, pageNum) {
+  if (!page) throw new Error("movePage: page is required");
+  if (!Number.isFinite(pageNum)) throw new Error("movePage: pageNum must be a number");
+
+  const u = toURL(page.url());
+  setParam(u, "page", pageNum);
+
+  const next = toHref(u);
+  if (next === page.url()) return page;
+
+  await gotoUrl(page, next, { waitUntil: "domcontentloaded" });
+
+  console.log(`[movePage] moved to page=${pageNum} url=${next}`);
+  return page;
+}
+
+/* ============================================================
+ crawl() 
+============================================================ */
+async function crawl(page, opts = {}) {
   if (!page) throw new Error("crawl: page is required");
-  if (!keyword) throw new Error("crawl: keyword is required");
 
-  const { limit = 10, outDir = "./out", fileName } = opts;
+  const {
+    tab,
+    date,
+    recommend = false,
+    keyword,
+    amount,
+    outDir = "./out",
+    fileName,
 
-  /** 1) 페이지가 리스트를 렌더링할 시간(최소) */
-  await page.waitForTimeout?.(300).catch(() => {});
+    /** 무한 탐색 방지 옵션 */
+    maxPages = 300,
+    maxConsecutiveNoDatePages = 8,
+  } = opts;
 
-  /** 2) 브라우저 DOM에서 후보 게시글 추출 */
-  const items = await page.evaluate(
-    ({ keyword, limit }) => {
-      const kw = String(keyword).toLowerCase();
-      const pickText = (el) => (el?.textContent || el?.innerText || "").trim();
-      const normHref = (href) => {
-        try { return new URL(href, location.href).href; } catch { return String(href || ""); }
-      };
+  if (!keyword) throw new Error("crawl: opts.keyword is required");
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("crawl: opts.amount must be a positive number");
+  }
 
-      /**
-       * 우선순위 1) 질문에서 준 구조:
-       *  <div class="gal-detail-lnkTb">
-       *    <a href="...">
-       *      <span class="subject">제목</span>
-       *      <ul class="info">
-       *        <li>tab</li>
-       *        <li>user</li>
-       *        <li>date/time</li>
-       *        <li>views</li>
-       *        <li>recommended</li>
-       *      </ul>
-       *    </a>
-       *  </div>
-       */
-      const rows = Array.from(document.querySelectorAll("div.gall-detail-lnktb"));
-      const out = [];
+  if (recommend === true) await selectRecommend(page);
+  if (typeof tab === "string" && tab.length > 0) await selectTab(page, tab);
 
-      for (const row of rows) {
-        const a = row.querySelector('a[href*="/board/"], a[href]');
-        if (!a) continue;
+  const range = date ? parseRange(date) : null;
+  const now = new Date();
 
-        const url = normHref(a.getAttribute("href") || a.href || "");
-        if (!url) continue;
-        if (!url.includes("/board/") && !url.includes("/mgallery/") && !url.includes("/mini/")) continue;
+  const curUrl = toURL(page.url());
+  const startPageNum = Number(curUrl.searchParams.get("page") || "1") || 1;
 
-        /** 제목: subject "안의 내용만" */
-        const titleEl =
-          row.querySelector(".subjectin") ||      // ✅ 실제 제목
-          row.querySelector(".subject");          // fallback
-        const title = pickText(titleEl);
-        // const subjectEl = row.querySelector(".subject");
-        // const title = pickText(subjectEl);
-        if (!title) continue;
+  const collected = [];
+  let pageNum = startPageNum;
+  let pagesVisited = 0;
+  let stopReason = null;
+  let consecutiveNoDatePages = 0;
 
-        /** keyword 필터: 제목 기준 */
-        if (!title.toLowerCase().includes(kw)) continue;
+  while (collected.length < amount) {
+    if (pagesVisited >= maxPages) {
+      stopReason = "max_pages_reached";
+      console.log(`[crawl] STOP ${stopReason} maxPages=${maxPages}`);
+      break;
+    }
 
-        /** ul.info 내 li 순서대로 매핑 */
-        const infoLis = Array.from(row.querySelectorAll("ul.ginfo > li"));
-        const info = infoLis.map((li) => pickText(li));
+    pagesVisited += 1;
+    console.log(`[crawl] LOOP page=${pageNum} url=${page.url()} collected=${collected.length}/${amount}`);
 
-        const tab = info[0] || null;
-        const user = info[1] || null;
-        const dateTime = info[2] || null;
-        const views = info[3] || null;
-        const recommended = info[4] || null;
+    await page.waitForSelector("body", { timeout: 20000 });
+    await page.waitForTimeout?.(300).catch(() => {});
 
-        out.push({
-          title,
-          url,
-          tab,
-          user,
-          dateTime,
-          views,
-          recommended,
-        });
+    /** ✅ 1-pass extract only (gall-detail-lnktb) */
+    const items = await page.evaluate(
+      ({ keyword, limit }) => {
+        const kw = String(keyword).toLowerCase();
+        const pickText = (el) => (el?.textContent || el?.innerText || "").trim();
+        const normHref = (href) => {
+          try { return new URL(href, location.href).href; } catch { return String(href || ""); }
+        };
 
-        if (out.length >= limit) break;
+        const rows = Array.from(document.querySelectorAll("div.gall-detail-lnktb"));
+        const out = [];
+
+        for (const row of rows) {
+          const a = row.querySelector('a[href*="/board/"], a[href*="/mgallery/"], a[href*="/mini/"], a[href]');
+          if (!a) continue;
+
+          const url = normHref(a.getAttribute("href") || a.href || "");
+          if (!url) continue;
+          if (!url.includes("/board/") && !url.includes("/mgallery/") && !url.includes("/mini/")) continue;
+
+          const titleEl = row.querySelector(".subjectin") || row.querySelector(".subject");
+          const title = pickText(titleEl);
+          if (!title) continue;
+          if (!title.toLowerCase().includes(kw)) continue;
+
+          const infoLis = Array.from(row.querySelectorAll("ul.ginfo > li"));
+          const info = infoLis.map((li) => pickText(li));
+
+          out.push({
+            title,
+            url,
+            tab: info[0] || null,
+            user: info[1] || null,
+            dateTime: info[2] || null,
+            views: info[3] || null,
+            upAdd: info[4] || null,
+            source: "gall-detail-lnktb",
+          });
+
+          if (out.length >= limit) break;
+        }
+
+        return out;
+      },
+      { keyword, limit: Math.max(50, amount) }
+    );
+
+    console.log(`[crawl] extracted=${items?.length} raw`);
+
+    let newestOnPage = null;
+    let oldestOnPage = null;
+    let parsedDateCount = 0;
+    let addedThisPage = 0;
+
+    const itemsArr = Array.isArray(items) ? items : [];
+
+    /** ✅ 크롤 -> date 판단(아이템별) */
+    for (let i = 0; i < itemsArr.length; i += 1) {
+      const it = itemsArr[i];
+      const postDate = toPostDate(it?.dateTime, now);
+
+      if (postDate) {
+        parsedDateCount += 1;
+        if (!newestOnPage || postDate.getTime() > newestOnPage.getTime()) newestOnPage = postDate;
+        if (!oldestOnPage || postDate.getTime() < oldestOnPage.getTime()) oldestOnPage = postDate;
       }
-      return out;
-    },
-    { keyword, limit }
-  );
 
-  /** 3) 파일 저장(JSON) */
+      if (!range) {
+        collected.push(it);
+        addedThisPage += 1;
+      } else {
+        if (!postDate) continue;
+
+        const inRange =
+          postDate.getTime() >= range.start.getTime() &&
+          postDate.getTime() <= range.end.getTime();
+
+        if (inRange) {
+          collected.push(it);
+          addedThisPage += 1;
+          console.log(
+            `[crawl] +1 title="${(it?.title || "").slice(0, 40)}" dateTime="${it?.dateTime}" -> date(KST)=${formatKST_YYYY_MM_DD(postDate)}`
+          );
+        }
+      }
+
+      if (collected.length >= amount) break;
+    }
+
+    const newestStr = newestOnPage ? formatKST_YYYY_MM_DD(newestOnPage) : "n/a";
+    const oldestStr = oldestOnPage ? formatKST_YYYY_MM_DD(oldestOnPage) : "n/a";
+    const rangeStr = range
+      ? `${formatKST_YYYY_MM_DD(range.start)}~${formatKST_YYYY_MM_DD(range.end)}`
+      : "none";
+
+    console.log(
+      `[crawl] PAGE_DONE page=${pageNum} added=${addedThisPage} parsedDates=${parsedDateCount} newest=${newestStr} oldest=${oldestStr} range=${rangeStr} total=${collected.length}/${amount}`
+    );
+
+    /** ✅ 무한 탐색 방지: 날짜 파싱이 계속 0이면 종료 */
+    if (range) {
+      if (parsedDateCount === 0) consecutiveNoDatePages += 1;
+      else consecutiveNoDatePages = 0;
+
+      if (consecutiveNoDatePages >= maxConsecutiveNoDatePages) {
+        stopReason = "date_parse_failed";
+        console.log(
+          `[crawl] STOP ${stopReason} consecutiveNoDatePages=${consecutiveNoDatePages}`
+        );
+        break;
+      }
+
+      /** ✅ 종료 조건: "이 페이지 최신글"조차 start보다 과거면 종료 */
+      if (newestOnPage && newestOnPage.getTime() < range.start.getTime()) {
+        stopReason = "date_out_of_range";
+        console.log(
+          `[crawl] STOP ${stopReason} newest=${newestStr} < start=${formatKST_YYYY_MM_DD(range.start)}`
+        );
+        break;
+      }
+    }
+
+    if (collected.length >= amount) {
+      stopReason = "amount_reached";
+      console.log(`[crawl] STOP ${stopReason}`);
+      break;
+    }
+
+    /** ✅ 페이지 이동(페이지당 1회) */
+    pageNum += 1;
+    console.log(`[crawl] MOVE nextPage=${pageNum}`);
+    await movePage(page, pageNum);
+  }
+
+  const finalItems = collected.slice(0, amount);
+  console.log(`[crawl] FINISH total=${finalItems.length} pagesVisited=${pagesVisited} stopReason=${stopReason}`);
+
   const safeDir = path.resolve(process.cwd(), outDir);
   await fs.promises.mkdir(safeDir, { recursive: true });
 
@@ -363,17 +671,17 @@ async function crawl(page, keyword, opts = {}) {
   const filePath = path.join(safeDir, outName);
 
   const payload = {
-    keyword,
-    limit,
+    filters: { tab: tab ?? null, date: date ?? null, recommend: !!recommend, keyword, amount },
     crawledAt: new Date().toISOString(),
-    pageUrl: page.url(),
-    count: items.length,
-    items
+    startUrl: page.url(),
+    pagesVisited,
+    stopReason,
+    count: finalItems.length,
+    items: finalItems,
   };
 
   await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), "utf8");
-
-  return { filePath, items };
+  return { filePath, items: finalItems, meta: payload };
 }
 
 /**
@@ -452,7 +760,7 @@ async function comment(page, text) {
       },
       { timeout: 15000 },
       memoSel
-    ).catch(() => {});
+    ).catch(() => { });
   }
 }
 
