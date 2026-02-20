@@ -24,14 +24,14 @@ const DC_PW = "property5596!!";
 
   await enterGallary(page, "트릭컬");
 
-  await crawl(page, {
-    tab: "전체",
-    date: "26. 02.09~26. 02.09",
-    recommend: false,
-    keyword: "볼",
-    amount: 20,
-    outDir: "./out",
-  });
+  // await crawl(page, {
+  //   tab: "전체",
+  //   date: "26. 02.09~26. 02.09",
+  //   recommend: false,
+  //   keyword: "볼",
+  //   amount: 20,
+  //   outDir: "./out",
+  // });
 
   // await gotoUrl(page, "https://m.dcinside.com/board/rollthechess/2982674");
 

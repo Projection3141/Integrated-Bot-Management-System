@@ -15,11 +15,11 @@ FILE: README.md
 ## 설치 / 실행 (PowerShell)
 
 ```powershell
-mkdir puppeteer-util
-cd puppeteer-util
+mkdir {name}
+cd {name}
 
 npm init -y
 npm i puppeteer
 
-# 아래 파일 3개 생성 후 실행
+# 아래 파일 3개 생성 후 실행 
 node app.js
