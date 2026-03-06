@@ -1,5 +1,5 @@
 /**
- * instaBot.js (POST ONLY - custom selectors)
+ * instagram/instaBot.js (POST ONLY - custom selectors)
  * - ✅ 로그인은 사용자 수동 처리
  * - ✅ 사용자가 준 “정확한 셀렉터/텍스트”로만 업로드 플로우 수행
  *

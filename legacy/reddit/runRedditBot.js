@@ -3,7 +3,14 @@
 require("dotenv").config();
 
 /* eslint-disable no-console */
-const { enterSite, gotoUrlSafe, loginRedditAuto, searchAndScroll, enterSubreddit, createTextPost, createComment, clickCommentSubmitButton,
+const { 
+    enterSite, 
+    gotoUrlSafe, 
+    loginRedditAuto, 
+    searchAndScroll, 
+    enterSubreddit, 
+    createTextPost, 
+    createComment
 } = require("./redditBot");
 
 (async () => {

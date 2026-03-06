@@ -1,5 +1,5 @@
 /**
- * runInstaPost.js
+ * instagram/runInstaPost.js
  * - 브라우저 뜸 → 사용자가 로그인 수동 → Enter → 업로드 자동 진행
  */
 

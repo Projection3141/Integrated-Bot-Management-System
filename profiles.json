@@ -28,7 +28,7 @@
         "width": 1000,
         "height": 1000,
         "deviceScaleFactor": 2,
-        "isMobile": true,
+        "isMobile": false,
         "hasTouch": true,
         "isLandscape": false
       },

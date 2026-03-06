@@ -1,5 +1,5 @@
 /* ============================================================
-FILE: chromiumUtil.js
+FILE: dcinside/chromiumUtil.js
 ============================================================ */
 
 /* eslint-disable no-console */

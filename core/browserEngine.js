@@ -1,0 +1,377 @@
+/**
+ * core/browserEngine.js
+ *
+ * =============================================================================
+ * 공통 브라우저 엔진
+ * =============================================================================
+ *
+ * 변경 사항:
+ *  1) profiles.json 로드 지원
+ *  2) storageKey / localeProfileKey 분리
+ *  3) globals / profiles 설정 실제 반영
+ *  4) mobile 설정은 옵션으로 on/off 가능
+ * =============================================================================
+ */
+
+const fs = require("fs");
+const path = require("path");
+const puppeteerExtra = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+
+const { ensureDir } = require("./helpers");
+const { gotoUrlSafe, waitForSelectorSafe } = require("./navigation");
+
+puppeteerExtra.use(StealthPlugin());
+
+/** ****************************************************************************
+ * profiles.json 로드
+ ******************************************************************************/
+const PROFILE_STORE = {
+  filePath: path.resolve(process.cwd(), "profiles.json"),
+  loadedAt: 0,
+  defaultKey: "kr",
+  globals: {},
+  profiles: {},
+};
+
+function loadProfiles(filePath = PROFILE_STORE.filePath) {
+  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+  const txt = fs.readFileSync(abs, "utf8");
+  const parsed = JSON.parse(txt);
+
+  PROFILE_STORE.filePath = abs;
+  PROFILE_STORE.loadedAt = Date.now();
+  PROFILE_STORE.defaultKey = typeof parsed?.default === "string" ? parsed.default : "kr";
+  PROFILE_STORE.globals = parsed?.globals && typeof parsed.globals === "object" ? parsed.globals : {};
+  PROFILE_STORE.profiles = parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {};
+}
+
+function getGlobals() {
+  return { ...PROFILE_STORE.globals };
+}
+
+function getLocaleProfile(localeProfileKey) {
+  const key = localeProfileKey || PROFILE_STORE.defaultKey;
+  return PROFILE_STORE.profiles[key] || PROFILE_STORE.profiles[PROFILE_STORE.defaultKey] || {};
+}
+
+loadProfiles();
+
+/** ****************************************************************************
+ * 캐시
+ ******************************************************************************/
+const MAX_BROWSERS = 4;
+const BROWSER_CACHE = new Map();
+const TEMP_BROWSERS = new Set();
+
+/** ****************************************************************************
+ * 기본값
+ ******************************************************************************/
+function pickDefaultsFromGlobals() {
+  const g = getGlobals();
+
+  return {
+    headless: typeof g.headless === "boolean" ? g.headless : false,
+    width: Number.isFinite(g.width) ? g.width : 1280,
+    height: Number.isFinite(g.height) ? g.height : 900,
+    baseChromeArgs: Array.isArray(g.baseChromeArgs) ? g.baseChromeArgs : [],
+    ui: g.ui && typeof g.ui === "object" ? g.ui : {},
+    mobile: g.mobile && typeof g.mobile === "object" ? g.mobile : {},
+  };
+}
+
+function baseChromeArgs({ width, height, extraArgs = [] }) {
+  const d = pickDefaultsFromGlobals();
+
+  return [
+    `--window-size=${width},${height}`,
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-features=IsolateOrigins,site-per-process",
+    ...d.baseChromeArgs,
+    ...extraArgs,
+  ];
+}
+
+/** ****************************************************************************
+ * userDataDir
+ ******************************************************************************/
+function getProfilesBaseDir() {
+  const base = path.resolve(process.cwd(), ".puppeteer_profiles");
+  ensureDir(base);
+  return base;
+}
+
+function resolveUserDataDir(storageKey = "default", mode = "persistent") {
+  const base = getProfilesBaseDir();
+  const safeKey = String(storageKey).replace(/[^\w\-]+/g, "_");
+
+  if (mode === "temp") {
+    const dir = path.join(
+      base,
+      `${safeKey}__tmp__${Date.now()}__${Math.random().toString(16).slice(2)}`
+    );
+    ensureDir(dir);
+    return dir;
+  }
+
+  const dir = path.join(base, safeKey);
+  ensureDir(dir);
+  return dir;
+}
+
+/** ****************************************************************************
+ * page 컨텍스트 적용
+ ******************************************************************************/
+async function applyPageContext(page, opts = {}) {
+  const {
+    viewport,
+    acceptLanguage,
+    timezone,
+    userAgent,
+    tag = "page",
+    useMobile = false,
+  } = opts;
+
+  if (acceptLanguage) {
+    try {
+      await page.setExtraHTTPHeaders({ "Accept-Language": acceptLanguage });
+    } catch {}
+  }
+
+  if (viewport) {
+    try {
+      await page.setViewport(viewport);
+    } catch {}
+  }
+
+  if (timezone) {
+    try {
+      await page.emulateTimezone(timezone);
+    } catch {}
+  }
+
+  if (userAgent) {
+    try {
+      await page.setUserAgent(String(userAgent));
+    } catch {}
+  }
+
+  page.on("framedetached", () => console.log(`[bot][${tag}] framedetached`));
+  page.on("error", (err) => console.log(`[bot][${tag}:error]`, err?.message || err));
+  page.on("pageerror", (err) => console.log(`[bot][${tag}:pageerror]`, err?.message || err));
+
+  page.__botMeta = {
+    viewport,
+    extraHTTPHeaders: acceptLanguage ? { "Accept-Language": acceptLanguage } : {},
+    timezone,
+    tag,
+    useMobile,
+    userAgent,
+  };
+}
+
+/** ****************************************************************************
+ * LRU
+ ******************************************************************************/
+function touchLRU(key) {
+  const entry = BROWSER_CACHE.get(key);
+  if (!entry) return;
+  entry.lastUsedAt = Date.now();
+  BROWSER_CACHE.delete(key);
+  BROWSER_CACHE.set(key, entry);
+}
+
+async function evictKey(key) {
+  const entry = BROWSER_CACHE.get(key);
+  if (!entry) return;
+
+  BROWSER_CACHE.delete(key);
+
+  try {
+    await entry.browser.close();
+  } catch {}
+}
+
+async function enforceMaxBrowsers() {
+  while (BROWSER_CACHE.size > MAX_BROWSERS) {
+    const lruKey = BROWSER_CACHE.keys().next().value;
+    await evictKey(lruKey);
+  }
+}
+
+/** ****************************************************************************
+ * browser 획득
+ ******************************************************************************/
+async function getBrowser(opts = {}) {
+  const d = pickDefaultsFromGlobals();
+  const localeProfile = getLocaleProfile(opts.localeProfileKey);
+
+  const {
+    storageKey = "default",
+    localeProfileKey,
+    headless = d.headless,
+    width = d.width,
+    height = d.height,
+    userDataDirMode = "persistent",
+    launchArgs = [],
+  } = opts;
+
+  if (userDataDirMode === "persistent") {
+    const cached = BROWSER_CACHE.get(storageKey);
+    if (cached?.browser?.isConnected?.()) {
+      touchLRU(storageKey);
+      return {
+        browser: cached.browser,
+        userDataDir: cached.userDataDir,
+        storageKey,
+        localeProfile,
+        isTemp: false,
+      };
+    }
+  }
+
+  const userDataDir = resolveUserDataDir(storageKey, userDataDirMode);
+
+  const args = baseChromeArgs({
+    width,
+    height,
+    extraArgs: [
+      ...(Array.isArray(localeProfile.chromeArgs) ? localeProfile.chromeArgs : []),
+      ...(Array.isArray(launchArgs) ? launchArgs : []),
+    ],
+  });
+
+  const browser = await puppeteerExtra.launch({
+    headless,
+    userDataDir,
+    args,
+    defaultViewport: d.ui?.defaultViewportNull ? null : { width, height },
+  });
+
+  if (userDataDirMode === "persistent") {
+    BROWSER_CACHE.set(storageKey, {
+      browser,
+      userDataDir,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+    });
+    await enforceMaxBrowsers();
+  } else {
+    TEMP_BROWSERS.add(browser);
+  }
+
+  return {
+    browser,
+    userDataDir,
+    storageKey,
+    localeProfile,
+    isTemp: userDataDirMode === "temp",
+  };
+}
+
+/** ****************************************************************************
+ * openPage
+ *
+ * 중요:
+ *  - storageKey: 세션/프로필 폴더 이름
+ *  - localeProfileKey: profiles.json 내부의 kr/en/jp 같은 키
+ *  - useMobile: 이 페이지에 모바일 에뮬레이션 적용 여부
+ ******************************************************************************/
+async function openPage(opts = {}) {
+  const d = pickDefaultsFromGlobals();
+
+  const {
+    url,
+    storageKey = "default",
+    localeProfileKey,
+    headless = d.headless,
+    viewport = { width: d.width, height: d.height },
+    userDataDirMode = "persistent",
+    tag = "page",
+    useMobile = false,
+  } = opts;
+
+  if (!url) throw new Error("openPage: url is required");
+
+  const { browser, userDataDir, localeProfile, isTemp } = await getBrowser({
+    storageKey,
+    localeProfileKey,
+    headless,
+    width: viewport.width,
+    height: viewport.height,
+    userDataDirMode,
+  });
+
+  const page = await browser.newPage();
+
+  let finalViewport = viewport;
+  let finalUserAgent = null;
+
+  if (useMobile && d.mobile?.enabled) {
+    finalViewport = d.mobile.viewport || viewport;
+    finalUserAgent = d.mobile.userAgent || null;
+  }
+
+  await applyPageContext(page, {
+    viewport: finalViewport,
+    acceptLanguage: localeProfile.acceptLanguage,
+    timezone: localeProfile.timezone,
+    userAgent: finalUserAgent,
+    tag,
+    useMobile,
+  });
+
+  await gotoUrlSafe(page, url, {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+
+  await waitForSelectorSafe(page, "body", 25000).catch(async () => {
+    await waitForSelectorSafe(page, "html", 25000);
+  });
+
+  return {
+    browser,
+    page,
+    userDataDir,
+    storageKey,
+    localeProfileKey: localeProfileKey || PROFILE_STORE.defaultKey,
+    isTemp,
+  };
+}
+
+async function closeProfile(storageKey) {
+  const entry = BROWSER_CACHE.get(storageKey);
+  if (!entry) return;
+
+  BROWSER_CACHE.delete(storageKey);
+
+  try {
+    await entry.browser.close();
+  } catch {}
+}
+
+async function closeAll() {
+  for (const key of Array.from(BROWSER_CACHE.keys())) {
+    await closeProfile(key);
+  }
+
+  for (const browser of Array.from(TEMP_BROWSERS)) {
+    try {
+      await browser.close();
+    } catch {}
+    TEMP_BROWSERS.delete(browser);
+  }
+}
+
+module.exports = {
+  loadProfiles,
+  getGlobals,
+  getLocaleProfile,
+  getBrowser,
+  openPage,
+  closeProfile,
+  closeAll,
+};

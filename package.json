@@ -1,4 +1,15 @@
 {
+  "name": "automation-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi platform automation bot for Reddit / Instagram / DCInside",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "reddit": "node platforms/reddit/runReddit.js",
+    "instagram": "node platforms/instagram/runInstagram.js",
+    "dc": "node platforms/dcinside/runDcinside.js"
+  },
   "dependencies": {
     "dotenv": "^17.2.4",
     "fs": "^0.0.1-security",
