@@ -3,12 +3,26 @@
   "version": "1.0.0",
   "private": true,
   "description": "Multi platform automation bot for Reddit / Instagram / DCInside",
-  "main": "index.js",
+  "main": "main.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "electron .",
+    "build": "electron-builder",
     "reddit": "node platforms/reddit/runReddit.js",
     "instagram": "node platforms/instagram/runInstagram.js",
     "dc": "node platforms/dcinside/runDcinside.js"
+  },
+  "build": {
+    "appId": "xyz.tailorchain.metahuman",
+    "productName": "metahuman",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    }
   },
   "dependencies": {
     "dotenv": "^17.2.4",
@@ -17,5 +31,9 @@
     "puppeteer": "^24.15.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "^26.8.1"
   }
 }

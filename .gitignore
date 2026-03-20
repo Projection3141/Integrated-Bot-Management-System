@@ -3,3 +3,8 @@ node_modules/
 out/
 .env
 .puppeteer_profiles/
+dist/
+build/
+history/
+legacy/
+debugLog

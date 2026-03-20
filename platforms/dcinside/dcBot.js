@@ -70,20 +70,26 @@ const {
 async function enterSite({
   startUrl = "https://m.naver.com",
   targetUrl = "https://m.dcinside.com",
-  profileKey = "dc_kr",
+  storageKey = "dc_main",
+  localeProfileKey = "kr",
   headless = false,
   searchQuery = "디시인사이드",
   viewport = { width: 430, height: 932 },
+  useMobile = true,
 } = {}) {
   const { browser, page } = await openPage({
     url: startUrl,
-    profileKey,
+    storageKey,
+    localeProfileKey,
     headless,
     viewport,
     userDataDirMode: "persistent",
-    acceptLanguage: "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    timezone: "Asia/Seoul",
+    useMobile,
     tag: "dc.page",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   });
 
   await naverSearchWithGivenInput(page, searchQuery);

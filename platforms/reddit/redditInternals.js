@@ -22,6 +22,7 @@ const { sleep } = require("../../core/helpers");
 const {
   withRetry,
   safeWaitNetworkIdle,
+  safeEvaluate,
   waitForSelectorSafe,
 } = require("../../core/navigation");
 
@@ -70,7 +71,8 @@ async function setFaceplateTextInputById(page, hostId, value, timeout = 20000) {
   const hostSel = `faceplate-text-input#${String(hostId)}`;
   await waitForSelectorSafe(page, hostSel, timeout);
 
-  const res = await page.evaluate(
+  const res = await safeEvaluate(
+    page,
     (sel, val) => {
       const host = document.querySelector(sel);
       if (!host) return { ok: false, reason: "NO_HOST" };
@@ -126,7 +128,7 @@ async function clickLoginButton(page, timeout = 20000) {
 
   return withRetry(
     async () => {
-      const ok = await page.evaluate((texts) => {
+      const ok = await safeEvaluate(page, (texts) => {
         const spans = Array.from(document.querySelectorAll("span"));
         const hit = spans.find((s) => texts.includes((s.textContent || "").trim()));
         if (!hit) return false;
@@ -151,7 +153,8 @@ async function setTitleFaceplateTextarea(page, title, timeout = 30000) {
   const hostSel = 'faceplate-textarea-input[name="title"]';
   await waitForSelectorSafe(page, hostSel, timeout);
 
-  const res = await page.evaluate(
+  const res = await safeEvaluate(
+    page,
     (sel, val) => {
       const host = document.querySelector(sel);
       if (!host) return { ok: false, reason: "NO_HOST" };
@@ -240,7 +243,7 @@ async function clickSubmitPostButton(page, timeout = 30000) {
 
   while (Date.now() - start < timeout) {
     // eslint-disable-next-line no-await-in-loop
-    const res = await page.evaluate(() => {
+    const res = await safeEvaluate(page, () => {
       const host = document.querySelector("r-post-form-submit-button#submit-post-button");
       const root = host?.shadowRoot;
 
@@ -282,7 +285,7 @@ async function clickCommentsActionButton(page, timeout = 15000) {
     console.log("[reddit][comment] trying to click comments button...");
 
     // eslint-disable-next-line no-await-in-loop
-    const res = await page.evaluate(() => {
+    const res = await safeEvaluate(page, () => {
       const roots = [document];
       const seen = new Set();
 
@@ -360,7 +363,7 @@ async function clickCommentsActionButton(page, timeout = 15000) {
 async function scrollToCommentsArea(page, { rounds = 8, step = 900 } = {}) {
   for (let i = 0; i < rounds; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    const moved = await page.evaluate(() => {
+    const moved = await safeEvaluate(page, () => {
       const candidates = [
         "#comment-tree",
         "#comments",
@@ -393,7 +396,7 @@ async function scrollToCommentsArea(page, { rounds = 8, step = 900 } = {}) {
     }
 
     // eslint-disable-next-line no-await-in-loop
-    await page.evaluate((dy) => window.scrollBy(0, dy), step);
+    await safeEvaluate(page, (dy) => window.scrollBy(0, dy), step);
     // eslint-disable-next-line no-await-in-loop
     await sleep(350);
   }
@@ -409,7 +412,7 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
 
   while (Date.now() - start < timeout) {
     // eslint-disable-next-line no-await-in-loop
-    const res = await page.evaluate(() => {
+    const res = await safeEvaluate(page, () => {
       const roots = [document];
       const seen = new Set();
 
@@ -530,7 +533,7 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
     }
 
     // eslint-disable-next-line no-await-in-loop
-    await page.evaluate(() => window.scrollBy(0, 700));
+    await safeEvaluate(page, () => window.scrollBy(0, 700));
     // eslint-disable-next-line no-await-in-loop
     await sleep(350);
   }
@@ -571,7 +574,7 @@ async function clickCommentSubmitButtonDeep(page, timeout = 20000) {
 
   while (Date.now() - start < timeout) {
     // eslint-disable-next-line no-await-in-loop
-    const res = await page.evaluate(() => {
+    const res = await safeEvaluate(page, () => {
       const roots = [document];
       const seen = new Set();
 

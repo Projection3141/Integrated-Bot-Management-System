@@ -24,7 +24,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { sleep, domClick, setValue } = require("../../core/helpers");
-const { gotoUrlSafe } = require("../../core/navigation");
+const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
 
 /** ****************************************************************************
  * URL helpers
@@ -153,7 +153,7 @@ function toPostDate(dateTimeRaw, now = new Date()) {
 async function naverSearchWithGivenInput(page, query) {
   await page.waitForSelector("#MM_SEARCH_FAKE", { timeout: 20000 });
 
-  await page.evaluate(() => {
+  await safeEvaluate(page, () => {
     const el = document.querySelector("#MM_SEARCH_FAKE");
     if (el) el.value = "";
   });
@@ -186,7 +186,7 @@ async function clickFirstDcinsideResult(page, browser) {
     });
   });
 
-  const clicked = await page.evaluate(() => {
+  const clicked = await safeEvaluate(page, () => {
     const links = Array.from(document.querySelectorAll('a[href]'));
     const target =
       links.find((a) => (a.getAttribute("href") || "").includes("m.dcinside.com")) ||
@@ -248,7 +248,7 @@ async function loginDcinside(page, { id, pw } = {}) {
   const hasCpiboxBtnBox = await page.$("div.cpibox.btn_box");
   if (hasCpiboxBtnBox) {
     const targetHref = "https://m.dcinside.com";
-    const clicked = await page.evaluate((href) => {
+    const clicked = await safeEvaluate(page, (href) => {
       const box = document.querySelector("div.cpibox.btn_box");
       if (!box) return false;
       const a = Array.from(box.querySelectorAll('a[href]')).find((x) => x.getAttribute("href") === href);
@@ -289,7 +289,7 @@ async function searchGallary(page, keyword) {
   ]);
 
   if (page.url() === before) {
-    await page.evaluate((inputSel) => {
+    await safeEvaluate(page, (inputSel) => {
       const input = document.querySelector(inputSel);
       const form = input?.closest("form");
       if (form && typeof form.submit === "function") form.submit();
@@ -311,7 +311,7 @@ async function clickFirstGalleryFromResult(page) {
 
   const popupPromise = new Promise((resolve) => page.once("popup", resolve));
 
-  const clicked = await page.evaluate((sel) => {
+  const clicked = await safeEvaluate(page, () => {
     const a = document.querySelector(sel);
     if (!a) return false;
     a.scrollIntoView({ block: "center", inline: "center" });
@@ -441,7 +441,8 @@ async function crawlGallary(page, opts = {}) {
     await page.waitForSelector("body", { timeout: 20000 });
     await sleep(300);
 
-    const items = await page.evaluate(
+    const items = await safeEvaluate(
+      page,
       ({ keyword: kwArg, limit }) => {
         const kw = String(kwArg).toLowerCase();
         const pickText = (el) => (el?.textContent || el?.innerText || "").trim();
@@ -615,7 +616,7 @@ async function writeComment(page, text) {
   await page.waitForSelector(memoSel, { timeout: 20000 });
   await page.focus(memoSel);
 
-  await page.evaluate((sel) => {
+  await safeEvaluate(page, (sel) => {
     const el = document.querySelector(sel);
     if (el) el.value = "";
   }, memoSel);
@@ -625,7 +626,7 @@ async function writeComment(page, text) {
   const beforeUrl = page.url();
   await Promise.allSettled([
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
-    page.evaluate((sel) => {
+    safeEvaluate(page, (sel) => {
       const btn = document.querySelector(sel);
       if (!btn) return false;
       btn.scrollIntoView({ block: "center", inline: "center" });

@@ -40,7 +40,7 @@
 
 const { openPage } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
-const { gotoUrlSafe } = require("../../core/navigation");
+const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
 
 const {
   waitForSelectorOrThrow,
@@ -55,19 +55,25 @@ const {
  ******************************************************************************/
 async function enterSite({
   targetUrl = "https://www.instagram.com/",
-  profileKey = "insta_kr",
+  storageKey = "instagram_main",
+  localeProfileKey = "kr",
   headless = false,
   viewport = { width: 1280, height: 900 },
+  useMobile = false,
 } = {}) {
   return openPage({
     url: targetUrl,
-    profileKey,
+    storageKey,
+    localeProfileKey,
     headless,
     viewport,
     userDataDirMode: "persistent",
-    acceptLanguage: "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    timezone: "Asia/Seoul",
+    useMobile,
     tag: "instagram.page",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   });
 }
 
@@ -135,7 +141,7 @@ async function setCaptionAndShareCustom(page, caption) {
 
   await waitForSelectorOrThrow(page, captionSel, 30000);
 
-  await page.evaluate((sel) => {
+  await safeEvaluate(page, (sel) => {
     const el = document.querySelector(sel);
     if (!el) return false;
     el.scrollIntoView({ block: "center", inline: "center" });
@@ -184,7 +190,7 @@ async function postInstaWithImagePostOnly({
     console.error("[insta] ❌ failed:", e?.message || e);
     return { ok: false, error: String(e?.message || e) };
   } finally {
-    await browser.close().catch(() => {});
+    await browser.close().catch(() => { });
   }
 }
 

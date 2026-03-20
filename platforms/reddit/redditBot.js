@@ -54,6 +54,7 @@ const { sleep } = require("../../core/helpers");
 const {
   gotoUrlSafe,
   safeWaitNetworkIdle,
+  safeEvaluate,
 } = require("../../core/navigation");
 
 const {
@@ -84,20 +85,25 @@ const {
  ******************************************************************************/
 async function enterSite({
   targetUrl = "https://www.reddit.com/",
-  profileKey = "reddit_kr",
+  storageKey = "reddit_main",
+  localeProfileKey = "kr",
   headless = false,
   viewport = { width: 1280, height: 900 },
   useTempProfile = true,
 } = {}) {
   return openPage({
     url: targetUrl,
-    profileKey,
+    storageKey,
+    localeProfileKey,
     headless,
     viewport,
     userDataDirMode: useTempProfile ? "temp" : "persistent",
-    acceptLanguage: "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    timezone: "Asia/Seoul",
+    useMobile: false,
     tag: "reddit.page",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   });
 }
 
@@ -156,7 +162,7 @@ async function searchAndScroll(page, { keyword, rounds = 4, delayMs = 900 } = {}
 
   for (let i = 0; i < rounds; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await safeEvaluate(page, () => window.scrollTo(0, document.body.scrollHeight));
     // eslint-disable-next-line no-await-in-loop
     await sleep(delayMs);
     // eslint-disable-next-line no-await-in-loop
@@ -269,6 +275,90 @@ async function createComment(page, { url, commentText } = {}) {
   return page;
 }
 
+function parseDateRange(range) {
+  if (!range) return {};
+
+  const [startRaw, endRaw] = String(range)
+    .split("~")
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+
+  const toEpoch = (str) => {
+    const d = new Date(str);
+    if (Number.isNaN(d.getTime())) return null;
+    return Math.floor(d.getTime() / 1000);
+  };
+
+  const from = toEpoch(startRaw);
+  const to = toEpoch(endRaw || startRaw);
+
+  return { from, to };
+}
+
+/**
+ * 특정 서브레딧에서 키워드로 검색한 게시글에 댓글 작성
+ */
+async function commentOnSearchResults(
+  page,
+  { subreddit, keyword, dateRange, count = 1, commentText } = {},
+) {
+  if (!page) throw new Error("commentOnSearchResults: page is required");
+  if (!subreddit) throw new Error("commentOnSearchResults: subreddit is required");
+  if (!keyword) throw new Error("commentOnSearchResults: keyword is required");
+  if (!commentText) throw new Error("commentOnSearchResults: commentText is required");
+  if (!count || count <= 0) return page;
+
+  const { from, to } = parseDateRange(dateRange);
+  const q = encodeURIComponent(String(keyword).trim());
+  const url = `/r/${encodeURIComponent(subreddit)}/search.json?q=${q}&restrict_sr=1&sort=new&limit=100`;
+
+  console.log("[reddit][comment] fetching search results:", url);
+
+  const res = await safeEvaluate(
+    page,
+    async (u) => {
+      const r = await fetch(u, { credentials: "same-origin" });
+      return r.json();
+    },
+    url,
+  );
+
+  const items = Array.isArray(res?.data?.children)
+    ? res.data.children.map((c) => {
+        const d = c?.data || {};
+        return {
+          title: d.title || "",
+          url: d.permalink ? `https://www.reddit.com${d.permalink}` : null,
+          createdUtc: Number(d.created_utc) || 0,
+        };
+      })
+    : [];
+
+  const matches = items.filter((item) => {
+    if (!item.url) return false;
+    const title = String(item.title || "").toLowerCase();
+    const kw = String(keyword || "").toLowerCase();
+
+    if (!title.includes(kw)) return false;
+
+    if (from && item.createdUtc < from) return false;
+    if (to && item.createdUtc > to) return false;
+
+    return true;
+  });
+
+  const selected = matches.slice(0, count);
+  const urls = selected.map((p) => p.url).filter(Boolean);
+
+  for (const post of selected) {
+    console.log("[reddit][comment] posting to", post.url);
+    page = await createComment(page, { url: post.url, commentText });
+    await sleep(1000);
+  }
+
+  return { page, urls };
+}
+
 module.exports = {
   enterSite,
   gotoUrlSafe,
@@ -277,4 +367,5 @@ module.exports = {
   enterSubreddit,
   createTextPost,
   createComment,
+  commentOnSearchResults,
 };

@@ -17,6 +17,7 @@
  */
 
 const { sleep, assertReadableFile } = require("../../core/helpers");
+const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
 
 /** ****************************************************************************
  * selector 대기
@@ -37,7 +38,7 @@ async function clickRoleButtonDivByText(page, text, timeout = 20000) {
 
   while (Date.now() - start < timeout) {
     // eslint-disable-next-line no-await-in-loop
-    const clicked = await page.evaluate((t) => {
+    const clicked = await safeEvaluate(page, (t) => {
       const nodes = Array.from(document.querySelectorAll('div[role="button"]'));
       const el = nodes.find((x) => (x.textContent || "").trim() === t);
       if (!el) return false;
@@ -67,7 +68,7 @@ async function clickCreateByIcon(page, timeout = 30000) {
 
   while (Date.now() - start < timeout) {
     // eslint-disable-next-line no-await-in-loop
-    const ok = await page.evaluate(() => {
+    const ok = await safeEvaluate(page, () => {
       const svg =
         document.querySelector('svg[aria-label="Create"]') ||
         document.querySelector('svg[aria-label="New post"]');
@@ -144,7 +145,7 @@ async function typeCaptionLexical(page, caption) {
 
   await page.waitForSelector(editorSel, { timeout: 30000 });
 
-  const debug = await page.evaluate((sel) => {
+  const debug = await safeEvaluate(page, (sel) => {
     const el = document.querySelector(sel);
     if (!el) return { ok: false, reason: "editor_not_found" };
 
@@ -187,7 +188,7 @@ async function typeCaptionLexical(page, caption) {
 
   if (ok) return true;
 
-  await page.evaluate((sel, text) => {
+  await safeEvaluate(page, (sel, text) => {
     const el = document.querySelector(sel);
     if (!el) return;
 

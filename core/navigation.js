@@ -11,7 +11,9 @@
  * =============================================================================
  */
 
-const { sleep } = require("./helpers");
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function errorMessage(e) {
   return String(e?.message || e || "");
@@ -154,7 +156,7 @@ async function gotoUrlSafe(page, url, opts = {}) {
 
   let lastErr = null;
 
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     try {
       await page.goto(String(url), { waitUntil, timeout });
       return page;
@@ -163,7 +165,7 @@ async function gotoUrlSafe(page, url, opts = {}) {
       console.log(`[bot][goto] fail(${i + 1}/3):`, errorMessage(e));
 
       if (isFrameDetachedError(e)) {
-        page = await recreatePage(page, page.__botMeta || {});
+        // page = await recreatePage(page, page.__botMeta || {});
         await sleep(350);
         continue;
       }
@@ -175,11 +177,102 @@ async function gotoUrlSafe(page, url, opts = {}) {
   throw lastErr;
 }
 
+/**
+ * safeEvaluate
+ *
+ * 역할:
+ *  - page.evaluate 실행
+ *  - frame detach / context destroy 시 retry
+ */
+async function safeEvaluate(page, fn, ...args) {
+  const lastArg = args[args.length - 1];
+  const isOpts =
+    lastArg &&
+    typeof lastArg === "object" &&
+    !Array.isArray(lastArg) &&
+    ("tries" in lastArg || "delayMs" in lastArg || "tag" in lastArg);
+
+  const opts = isOpts ? args.pop() : {};
+  const {
+    tries = 4,
+    delayMs = 350,
+    tag = "evaluate",
+  } = opts;
+
+  // eslint-disable-next-line no-console
+  console.log("page type is ", typeof page);
+
+  return withRetry(
+    async () => {
+      return await page.evaluate(fn, ...args);
+    },
+    { tries, delayMs, tag }
+  );
+}
+
+/**
+ * safeWaitForFunction
+ *
+ * 역할:
+ *  - waitForFunction 실행
+ *  - frame detach / context destroy 시 retry
+ */
+async function safeWaitForFunction(page, fn, opts = {}) {
+
+  const {
+    timeout = 30000,
+    tries = 4,
+    delayMs = 400,
+    tag = "waitForFunction",
+  } = opts;
+
+  let lastErr = null;
+
+  for (let i = 0; i < tries; i++) {
+
+    try {
+
+      await page.waitForFunction(fn, { timeout });
+
+      return page;
+
+    } catch (e) {
+
+      lastErr = e;
+
+      console.log(`[bot][${tag}] fail(${i + 1}/${tries}):`, errorMessage(e));
+
+      if (isFrameDetachedError(e)) {
+
+        page = await recreatePage(page, page.__botMeta || {});
+        await sleep(delayMs);
+        continue;
+
+      }
+
+      if (isContextDestroyedError(e)) {
+
+        await sleep(delayMs);
+        continue;
+
+      }
+
+      throw e;
+
+    }
+
+  }
+
+  throw lastErr;
+}
+
 module.exports = {
   withRetry,
   safeWaitNetworkIdle,
   waitForSelectorSafe,
   gotoUrlSafe,
+  safeEvaluate,
+  safeWaitForFunction,
   recreatePage,
   isFrameDetachedError,
   isContextDestroyedError,

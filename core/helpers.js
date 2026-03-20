@@ -21,6 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { safeEvaluate } = require("./navigation");
 
 /** ****************************************************************************
  * 시간 지연
@@ -76,7 +77,7 @@ async function domClick(page, selector) {
   if (!page) throw new Error("domClick: page is required");
   if (!selector) throw new Error("domClick: selector is required");
 
-  const ok = await page.evaluate((sel) => {
+  const ok = await safeEvaluate(page, (sel) => {
     const el = document.querySelector(sel);
     if (!el) return false;
 
@@ -116,7 +117,7 @@ async function setValue(page, selector, value, { timeout = 20000, delay = 25 } =
   await page.waitForSelector(selector, { timeout });
   await page.focus(selector);
 
-  await page.evaluate((sel) => {
+  await safeEvaluate(page, (sel) => {
     const el = document.querySelector(sel);
     if (!el) return;
 

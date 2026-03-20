@@ -19,7 +19,7 @@ const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 
 const { ensureDir } = require("./helpers");
-const { gotoUrlSafe, waitForSelectorSafe } = require("./navigation");
+const { gotoUrlSafe, waitForSelectorSafe, safeWaitForFunction } = require("./navigation");
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -73,7 +73,7 @@ function pickDefaultsFromGlobals() {
   return {
     headless: typeof g.headless === "boolean" ? g.headless : false,
     width: Number.isFinite(g.width) ? g.width : 1280,
-    height: Number.isFinite(g.height) ? g.height : 900,
+    height: Number.isFinite(g.height) ? g.height : 1300,
     baseChromeArgs: Array.isArray(g.baseChromeArgs) ? g.baseChromeArgs : [],
     ui: g.ui && typeof g.ui === "object" ? g.ui : {},
     mobile: g.mobile && typeof g.mobile === "object" ? g.mobile : {},
@@ -89,6 +89,7 @@ function baseChromeArgs({ width, height, extraArgs = [] }) {
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-site-isolation-trials",
     ...d.baseChromeArgs,
     ...extraArgs,
   ];
@@ -137,25 +138,25 @@ async function applyPageContext(page, opts = {}) {
   if (acceptLanguage) {
     try {
       await page.setExtraHTTPHeaders({ "Accept-Language": acceptLanguage });
-    } catch {}
+    } catch { }
   }
 
   if (viewport) {
     try {
       await page.setViewport(viewport);
-    } catch {}
+    } catch { }
   }
 
   if (timezone) {
     try {
       await page.emulateTimezone(timezone);
-    } catch {}
+    } catch { }
   }
 
   if (userAgent) {
     try {
       await page.setUserAgent(String(userAgent));
-    } catch {}
+    } catch { }
   }
 
   page.on("framedetached", () => console.log(`[bot][${tag}] framedetached`));
@@ -191,7 +192,7 @@ async function evictKey(key) {
 
   try {
     await entry.browser.close();
-  } catch {}
+  } catch { }
 }
 
 async function enforceMaxBrowsers() {
@@ -244,7 +245,7 @@ async function getBrowser(opts = {}) {
   });
 
   const browser = await puppeteerExtra.launch({
-    headless,
+    headless, // true : 브라우저 창 숨김, false : 브라우저 창 표시
     userDataDir,
     args,
     defaultViewport: d.ui?.defaultViewportNull ? null : { width, height },
@@ -304,7 +305,7 @@ async function openPage(opts = {}) {
     userDataDirMode,
   });
 
-  const page = await browser.newPage();
+  let page = await browser.newPage();
 
   let finalViewport = viewport;
   let finalUserAgent = null;
@@ -328,6 +329,13 @@ async function openPage(opts = {}) {
     timeout: 30000,
   });
 
+  // 페이지가 완전히 로드될 때까지 대기
+  page = await safeWaitForFunction(
+    page,
+    () => document.body && document.body.children.length > 0,
+    { tag: "pageReady" }
+  );
+
   await waitForSelectorSafe(page, "body", 25000).catch(async () => {
     await waitForSelectorSafe(page, "html", 25000);
   });
@@ -350,7 +358,7 @@ async function closeProfile(storageKey) {
 
   try {
     await entry.browser.close();
-  } catch {}
+  } catch { }
 }
 
 async function closeAll() {
@@ -361,7 +369,7 @@ async function closeAll() {
   for (const browser of Array.from(TEMP_BROWSERS)) {
     try {
       await browser.close();
-    } catch {}
+    } catch { }
     TEMP_BROWSERS.delete(browser);
   }
 }
