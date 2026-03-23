@@ -1,6 +1,6 @@
 {
-  "name": "automation-bot",
-  "version": "1.0.0",
+  "name": "integrated-bot-management-system",
+  "version": "1.0.1",
   "private": true,
   "description": "Multi platform automation bot for Reddit / Instagram / DCInside",
   "main": "main.js",
@@ -13,7 +13,7 @@
   },
   "build": {
     "appId": "xyz.tailorchain.IBMS",
-    "productName": "Integrated Bot Management System",
+    "productName": "integrated-bot-management-system",
     "directories": {
       "output": "dist"
     },

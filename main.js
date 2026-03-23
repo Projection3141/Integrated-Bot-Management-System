@@ -29,17 +29,24 @@ const { spawn, exec } = require("child_process");
 /** ****************************************************************************
  * 이력 저장 경로
  ******************************************************************************/
-const HISTORY_DIR = path.resolve(process.cwd(), "history");
-const HISTORY_FILE = path.join(HISTORY_DIR, "history.log");
+function getHistoryDir() {
+  return path.join(app.getPath("userData"), "meta-human", "history");
+}
+
+function getHistoryFile() {
+  return path.join(getHistoryDir(), "history.log");
+}
 
 /** ****************************************************************************
  * 계정 저장 경로
  ******************************************************************************/
-const ACCOUNT_FILE = path.join(process.cwd(), "configs", "account.json");
+function getAccountFile() {
+  return path.join(app.getPath("userData"), "meta-human", "account.json");
+}
 
 function ensureHistoryDir() {
   try {
-    fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    fs.mkdirSync(getHistoryDir(), { recursive: true });
   } catch {
     /** ignore */
   }
@@ -52,7 +59,7 @@ function appendHistory(entry) {
       createdAt: new Date().toISOString(),
       ...entry,
     });
-    fs.appendFileSync(HISTORY_FILE, line + "\n", "utf8");
+    fs.appendFileSync(getHistoryFile(), line + "\n", "utf8");
   } catch {
     /** ignore */
   }
@@ -61,9 +68,10 @@ function appendHistory(entry) {
 function readHistory() {
   try {
     ensureHistoryDir();
-    if (!fs.existsSync(HISTORY_FILE)) return [];
+    const historyFile = getHistoryFile();
+    if (!fs.existsSync(historyFile)) return [];
 
-    const raw = fs.readFileSync(HISTORY_FILE, "utf8");
+    const raw = fs.readFileSync(historyFile, "utf8");
     return raw
       .split(/\r?\n/)
       .filter(Boolean)
@@ -84,8 +92,9 @@ function readHistory() {
  ******************************************************************************/
 function readAccounts() {
   try {
-    if (!fs.existsSync(ACCOUNT_FILE)) return [];
-    const raw = fs.readFileSync(ACCOUNT_FILE, "utf8");
+    const accountFile = getAccountFile();
+    if (!fs.existsSync(accountFile)) return [];
+    const raw = fs.readFileSync(accountFile, "utf8");
     return JSON.parse(raw);
   } catch {
     return [];
@@ -94,7 +103,10 @@ function readAccounts() {
 
 function writeAccounts(accounts) {
   try {
-    fs.writeFileSync(ACCOUNT_FILE, JSON.stringify(accounts, null, 2), "utf8");
+    const accountFile = getAccountFile();
+    const dir = path.dirname(accountFile);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(accountFile, JSON.stringify(accounts, null, 2), "utf8");
   } catch (err) {
     console.error("[MAIN] writeAccounts error:", err);
   }
