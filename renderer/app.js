@@ -30,6 +30,7 @@ const state = {
   /** bot 실행 설정 */
   config: {
     target: "reddit",
+    selectedAccount: "",
     reddit: {
       dateRange: "",
       subreddit: "",
@@ -38,6 +39,9 @@ const state = {
       commentText: "",
     },
   },
+
+  /** 계정 목록 */
+  accounts: [],
 };
 
 /** ****************************************************************************
@@ -54,6 +58,18 @@ const botConfigEl = document.getElementById("bot-config");
 const historyPanelEl = document.getElementById("history-panel");
 const historyListEl = document.getElementById("history-list");
 const historyBackBtnEl = document.getElementById("history-back-btn");
+const accountBtnEl = document.getElementById("account-btn");
+const accountPanelEl = document.getElementById("account-panel");
+const accountListEl = document.getElementById("account-list");
+const accountBackBtnEl = document.getElementById("account-back-btn");
+const accountAddBtnEl = document.getElementById("account-add-btn");
+const accountModalEl = document.getElementById("account-modal");
+const modalCloseEl = document.getElementById("modal-close");
+const modalCancelEl = document.getElementById("modal-cancel");
+const modalAddEl = document.getElementById("modal-add");
+const accountNameEl = document.getElementById("account-name");
+const accountUsernameEl = document.getElementById("account-username");
+const accountPasswordEl = document.getElementById("account-password");
 
 
 /**
@@ -79,6 +95,8 @@ function renderHeadlessToggle() {
  * bot 실행 설정
  ******************************************************************************/
 function renderBotConfig() {
+  const accountOptions = state.accounts.map(acc => `<option value="${escapeHtml(acc.name)}" ${state.config.selectedAccount === acc.name ? "selected" : ""}>${escapeHtml(acc.name)}</option>`).join("");
+
   botConfigEl.innerHTML = `
     <div class="bot-config-row">
       <label for="target-select">적용 대상</label>
@@ -86,6 +104,14 @@ function renderBotConfig() {
         <option value="reddit" ${state.config.target === "reddit" ? "selected" : ""}>Reddit</option>
         <option value="instagram" ${state.config.target === "instagram" ? "selected" : ""}>Instagram</option>
         <option value="dc" ${state.config.target === "dc" ? "selected" : ""}>DCInside</option>
+      </select>
+    </div>
+
+    <div class="bot-config-row">
+      <label for="account-select">계정 선택</label>
+      <select id="account-select" class="select">
+        <option value="">계정 선택...</option>
+        ${accountOptions}
       </select>
     </div>
 
@@ -128,10 +154,15 @@ function renderBotConfig() {
 
 function updateBotConfigUI() {
   const targetSelect = document.getElementById("target-select");
+  const accountSelect = document.getElementById("account-select");
   const redditConfig = document.getElementById("reddit-config");
 
   if (targetSelect) {
     targetSelect.value = state.config.target;
+  }
+
+  if (accountSelect) {
+    accountSelect.value = state.config.selectedAccount;
   }
 
   if (redditConfig) {
@@ -158,6 +189,11 @@ function handleBotConfigInput(event) {
     state.config.target = value;
     renderBots();
     updateBotConfigUI();
+    return;
+  }
+
+  if (id === "account-select") {
+    state.config.selectedAccount = value;
     return;
   }
 
@@ -328,11 +364,32 @@ async function handleBotActionClick(event) {
         renderLogs();
         return;
       }
+      if (!state.config.selectedAccount) {
+        state.logs.push({
+          key: "reddit",
+          level: "error",
+          message: "계정을 선택해 주세요.",
+          ts: new Date().toISOString(),
+        });
+        renderLogs();
+        return;
+      }
     }
 
     const options = {
       headless: state.launchOptions.headless,
     };
+
+    // 선택된 계정 정보 추가
+    if (state.config.selectedAccount) {
+      const account = state.accounts.find(acc => acc.name === state.config.selectedAccount);
+      if (account) {
+        options.account = {
+          username: account.username,
+          password: account.password,
+        };
+      }
+    }
 
     if (key === "reddit") {
       options.redditConfig = { ...state.config.reddit };
@@ -434,8 +491,84 @@ function hideHistory() {
   botGridEl.closest(".panel").classList.remove("hidden");
 }
 
+async function loadAccounts() {
+  const accounts = await window.botAPI.listAccounts();
+  state.accounts = accounts;
+  renderAccounts();
+  renderBotConfig(); // 계정 목록이 바뀌었으므로 bot config도 재렌더링
+}
+
+function renderAccounts() {
+  accountListEl.innerHTML = state.accounts
+    .map((account) => `
+      <div class="account-card">
+        <div class="account-info">
+          <div><strong>이름:</strong> ${escapeHtml(account.name)}</div>
+          <div><strong>아이디:</strong> ${escapeHtml(account.username)}</div>
+        </div>
+        <div class="account-actions">
+          <button class="btn btn-danger" data-action="remove" data-name="${escapeHtml(account.name)}">삭제</button>
+        </div>
+      </div>
+    `)
+    .join("");
+}
+
+function showAccount() {
+  botGridEl.closest(".panel").classList.add("hidden");
+  accountPanelEl.classList.remove("hidden");
+  loadAccounts();
+}
+
+function hideAccount() {
+  accountPanelEl.classList.add("hidden");
+  botGridEl.closest(".panel").classList.remove("hidden");
+}
+
+function showAccountModal() {
+  accountNameEl.value = "";
+  accountUsernameEl.value = "";
+  accountPasswordEl.value = "";
+  accountModalEl.classList.remove("hidden");
+}
+
+function hideAccountModal() {
+  accountModalEl.classList.add("hidden");
+}
+
+async function addAccountFromModal() {
+  const name = accountNameEl.value.trim();
+  const username = accountUsernameEl.value.trim();
+  const password = accountPasswordEl.value;
+
+  if (!name || !username || !password) {
+    alert("모든 필드를 입력해 주세요.");
+    return;
+  }
+
+  const res = await window.botAPI.addAccount(name, username, password);
+  if (res.ok) {
+    loadAccounts();
+    hideAccountModal();
+  } else {
+    alert(`계정 추가 실패: ${res.error}`);
+  }
+}
+
+async function removeAccount(name) {
+  if (!confirm(`계정 '${name}'을(를) 삭제하시겠습니까?`)) return;
+
+  const res = await window.botAPI.removeAccount(name);
+  if (res.ok) {
+    loadAccounts();
+  } else {
+    alert(`계정 삭제 실패: ${res.error}`);
+  }
+}
+
 async function init() {
   await refreshBots();
+  await loadAccounts();
   renderLogs();
   renderHeadlessToggle();
   renderBotConfig();
@@ -447,6 +580,34 @@ async function init() {
   botGridEl.addEventListener("click", handleBotActionClick);
   historyBtnEl.addEventListener("click", showHistory);
   historyBackBtnEl.addEventListener("click", hideHistory);
+  accountBtnEl.addEventListener("click", showAccount);
+  accountBackBtnEl.addEventListener("click", hideAccount);
+  accountAddBtnEl.addEventListener("click", showAccountModal);
+  modalCloseEl.addEventListener("click", hideAccountModal);
+  modalCancelEl.addEventListener("click", hideAccountModal);
+  modalAddEl.addEventListener("click", addAccountFromModal);
+
+  // 모달 외부 클릭 시 닫기
+  accountModalEl.addEventListener("click", (event) => {
+    if (event.target === accountModalEl) {
+      hideAccountModal();
+    }
+  });
+
+  // 모달에서 Enter 키로 추가
+  accountModalEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      addAccountFromModal();
+    }
+  });
+  accountListEl.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const { action, name } = button.dataset;
+    if (action === "remove") {
+      removeAccount(name);
+    }
+  });
 
   refreshBtnEl.addEventListener("click", async () => {
     await refreshBots();

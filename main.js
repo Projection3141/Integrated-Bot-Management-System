@@ -32,6 +32,11 @@ const { spawn, exec } = require("child_process");
 const HISTORY_DIR = path.resolve(process.cwd(), "history");
 const HISTORY_FILE = path.join(HISTORY_DIR, "history.log");
 
+/** ****************************************************************************
+ * 계정 저장 경로
+ ******************************************************************************/
+const ACCOUNT_FILE = path.join(process.cwd(), "configs", "account.json");
+
 function ensureHistoryDir() {
   try {
     fs.mkdirSync(HISTORY_DIR, { recursive: true });
@@ -72,6 +77,47 @@ function readHistory() {
   } catch {
     return [];
   }
+}
+
+/** ****************************************************************************
+ * 계정 관리
+ ******************************************************************************/
+function readAccounts() {
+  try {
+    if (!fs.existsSync(ACCOUNT_FILE)) return [];
+    const raw = fs.readFileSync(ACCOUNT_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function writeAccounts(accounts) {
+  try {
+    fs.writeFileSync(ACCOUNT_FILE, JSON.stringify(accounts, null, 2), "utf8");
+  } catch (err) {
+    console.error("[MAIN] writeAccounts error:", err);
+  }
+}
+
+function addAccount(name, username, password) {
+  const accounts = readAccounts();
+  if (accounts.some(acc => acc.name === name)) {
+    return { ok: false, error: `Account '${name}' already exists` };
+  }
+  accounts.push({ name, username, password });
+  writeAccounts(accounts);
+  return { ok: true };
+}
+
+function removeAccount(name) {
+  const accounts = readAccounts();
+  const filtered = accounts.filter(acc => acc.name !== name);
+  if (filtered.length === accounts.length) {
+    return { ok: false, error: `Account '${name}' not found` };
+  }
+  writeAccounts(filtered);
+  return { ok: true };
 }
 
 /** ****************************************************************************
@@ -293,6 +339,12 @@ async function startBot(key, options = {}) {
     BOT_HEADLESS: options.headless ? "1" : "0",
   };
 
+  // 계정 정보 설정
+  if (options.account) {
+    env.BOT_USERNAME = options.account.username;
+    env.BOT_PASSWORD = options.account.password;
+  }
+
   if (key === "reddit" && options.redditConfig) {
     const cfg = options.redditConfig;
     if (cfg.subreddit) env.REDDIT_TARGET_SUBREDDIT = cfg.subreddit;
@@ -427,6 +479,18 @@ function registerIpc() {
 
   ipcMain.handle("bot:getHistory", async () => {
     return readHistory();
+  });
+
+  ipcMain.handle("account:list", async () => {
+    return readAccounts();
+  });
+
+  ipcMain.handle("account:add", async (_event, name, username, password) => {
+    return addAccount(name, username, password);
+  });
+
+  ipcMain.handle("account:remove", async (_event, name) => {
+    return removeAccount(name);
   });
 }
 
