@@ -12,8 +12,8 @@
     "dc": "node platforms/dcinside/runDcinside.js"
   },
   "build": {
-    "appId": "xyz.tailorchain.metahuman",
-    "productName": "metahuman",
+    "appId": "xyz.tailorchain.IBMS",
+    "productName": "Integrated Bot Management System",
     "directories": {
       "output": "dist"
     },
