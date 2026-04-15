@@ -21,7 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { safeEvaluate } = require("./navigation");
+const { clickInFrame, fillInFrame } = require("./navigation");
 
 /** ****************************************************************************
  * 시간 지연
@@ -102,9 +102,8 @@ async function assertReadableFile(targetPath, opts = {}) {
  * 일반 DOM 클릭
  *
  * 설명:
- *  - querySelector로 요소를 찾고
- *  - 보이는 위치로 스크롤한 뒤
- *  - click()을 호출한다.
+ *  - selector를 즉시 클릭
+ *  - locator/selector 기반 공통 액션 사용
  *
  * 용도:
  *  - DCInside 같은 일반 DOM 기반 사이트
@@ -113,24 +112,7 @@ async function domClick(page, selector) {
   if (!page) throw new Error("domClick: page is required");
   if (!selector) throw new Error("domClick: selector is required");
 
-  const ok = await safeEvaluate(page, (sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return false;
-
-    try {
-      el.scrollIntoView({ block: "center", inline: "center" });
-    } catch {
-      /** ignore */
-    }
-
-    const clickable = el instanceof HTMLElement ? el : el.parentElement;
-    clickable?.click?.();
-    return true;
-  }, selector);
-
-  if (!ok) {
-    throw new Error(`domClick failed: ${selector}`);
-  }
+  await clickInFrame(page, selector, { tag: "domClick" });
   return true;
 }
 
@@ -139,33 +121,16 @@ async function domClick(page, selector) {
  *
  * 설명:
  *  - selector 대기
- *  - focus
- *  - 기존값 비우기
- *  - keyboard.type으로 입력
+ *  - fillInFrame 기반 값 설정
  *
  * 용도:
  *  - 일반 입력 필드
  ******************************************************************************/
-async function setValue(page, selector, value, { timeout = 20000, delay = 25 } = {}) {
+async function setValue(page, selector, value, { timeout = 20000 } = {}) {
   if (!page) throw new Error("setValue: page is required");
   if (!selector) throw new Error("setValue: selector is required");
 
-  await page.waitForSelector(selector, { timeout });
-  await page.focus(selector);
-
-  await safeEvaluate(page, (sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return;
-
-    if ("value" in el) {
-      el.value = "";
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  }, selector);
-
-  await page.keyboard.type(String(value ?? ""), { delay });
-
+  await fillInFrame(page, selector, String(value ?? ""), { timeout, tag: "setValue" });
   return true;
 }
 

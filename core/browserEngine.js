@@ -11,6 +11,38 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const { ensureDir } = require("./helpers");
 const { gotoUrlSafe, waitForSelectorSafe, safeWaitForFunction } = require("./navigation");
 
+function attachFrameLifecycleDebug(page, opts = {}) {
+  const tag = opts.tag || page.__botMeta?.tag || "page";
+  const logFrame = (event, frame) => {
+    const url = typeof frame?.url === "function" ? frame.url() : "";
+    const name = typeof frame?.name === "function" ? frame.name() : "";
+    console.log(`[bot][${tag}][${event}] name=${name} url=${url}`);
+  };
+
+  page.on("frameattached", (frame) => logFrame("frameattached", frame));
+  page.on("framenavigated", (frame) => logFrame("framenavigated", frame));
+  page.on("framedetached", (frame) => logFrame("framedetached", frame));
+
+  if (opts.cdp && page.target && typeof page.target === "function") {
+    page
+      .target()
+      .createCDPSession()
+      .then((client) => {
+        client.send("Page.enable").catch(() => {});
+        client.on("Page.frameAttached", (payload) => {
+          console.log(`[bot][${tag}:cdp] frameAttached id=${payload.frameId}`);
+        });
+        client.on("Page.frameNavigated", (payload) => {
+          console.log(`[bot][${tag}:cdp] frameNavigated id=${payload.frame.id} url=${payload.frame.url}`);
+        });
+        client.on("Page.frameDetached", (payload) => {
+          console.log(`[bot][${tag}:cdp] frameDetached id=${payload.frameId}`);
+        });
+      })
+      .catch(() => {});
+  }
+}
+
 puppeteerExtra.use(StealthPlugin());
 
 /** ****************************************************************************
@@ -211,7 +243,7 @@ async function applyPageContext(page, opts = {}) {
     } catch { }
   }
 
-  page.on("framedetached", () => console.log(`[bot][${tag}] framedetached`));
+  attachFrameLifecycleDebug(page, { tag, cdp: opts.debugLifecycleCdp });
   page.on("error", (err) => console.log(`[bot][${tag}:error]`, err?.message || err));
   page.on("pageerror", (err) => console.log(`[bot][${tag}:pageerror]`, err?.message || err));
 
@@ -383,15 +415,7 @@ async function openPage(opts = {}) {
     timeout: 30000,
   });
 
-  page = await safeWaitForFunction(
-    page,
-    () => document.body && document.body.children.length > 0,
-    { tag: "pageReady" }
-  );
-
-  await waitForSelectorSafe(page, "body", 25000).catch(async () => {
-    await waitForSelectorSafe(page, "html", 25000);
-  });
+  await waitForSelectorSafe(page, "body", 25000);
 
   return {
     browser,

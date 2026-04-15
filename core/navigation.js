@@ -148,6 +148,162 @@ async function recreatePage(page, meta = {}) {
   return newPage;
 }
 
+/** ****************************************************************************
+ * 공통 frame / DOM 액션 유틸
+ * stale frame/handle 재사용 방지
+ ******************************************************************************/
+
+function isLocatorSupported(target) {
+  return target && typeof target.locator === "function";
+}
+
+function getPageFromTarget(target) {
+  if (target && typeof target.page === "function") {
+    try {
+      return target.page();
+    } catch {
+      return target;
+    }
+  }
+  return target;
+}
+
+async function getLiveFrame(page, predicate, opts = {}) {
+  if (!page) throw new Error("getLiveFrame: page is required");
+  if (typeof predicate !== "function") throw new Error("getLiveFrame: predicate must be a function");
+
+  const { timeout = 10000, pollInterval = 100, tag = "getLiveFrame" } = opts;
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    try {
+      const frame = page.frames().find((f) => !f.isDetached() && predicate(f));
+      if (frame) return frame;
+    } catch (e) {
+      console.log(`[bot][${tag}] frame discovery error:`, errorMessage(e));
+    }
+    await sleep(pollInterval);
+  }
+
+  return null;
+}
+
+async function withLiveFrame(page, predicate, task, opts = {}) {
+  if (typeof task !== "function") throw new Error("withLiveFrame: task must be a function");
+
+  const frame = await getLiveFrame(page, predicate, opts);
+  if (!frame) {
+    throw new Error("withLiveFrame: no live frame found");
+  }
+
+  try {
+    return await task(frame);
+  } catch (e) {
+    if (isFrameDetachedError(e) || isContextDestroyedError(e)) {
+      const nextFrame = await getLiveFrame(page, predicate, opts);
+      if (nextFrame && nextFrame !== frame) {
+        return await task(nextFrame);
+      }
+    }
+    throw e;
+  }
+}
+
+async function clickInFrame(target, selector, opts = {}) {
+  if (!target) throw new Error("clickInFrame: target is required");
+  if (!selector) throw new Error("clickInFrame: selector is required");
+
+  const { timeout = 10000, tag = "clickInFrame" } = opts;
+  if (isLocatorSupported(target)) {
+    const locator = target.locator(selector);
+    await locator.waitFor({ timeout });
+    await locator.click();
+    return;
+  }
+
+  let handle = null;
+  try {
+    handle = await target.waitForSelector(selector, { timeout });
+    if (!handle) throw new Error(`clickInFrame: selector not found ${selector}`);
+    await handle.click();
+  } catch (e) {
+    console.log(`[bot][${tag}] fallback click failed:`, errorMessage(e));
+    throw e;
+  } finally {
+    if (handle && typeof handle.dispose === "function") {
+      await handle.dispose();
+    }
+  }
+}
+
+async function fillInFrame(target, selector, value, opts = {}) {
+  if (!target) throw new Error("fillInFrame: target is required");
+  if (!selector) throw new Error("fillInFrame: selector is required");
+
+  const { timeout = 10000, tag = "fillInFrame" } = opts;
+  if (isLocatorSupported(target)) {
+    const locator = target.locator(selector);
+    await locator.waitFor({ timeout });
+    await locator.fill(String(value ?? ""));
+    return;
+  }
+
+  let handle = null;
+  const page = getPageFromTarget(target);
+  try {
+    handle = await target.waitForSelector(selector, { timeout });
+    if (!handle) throw new Error(`fillInFrame: selector not found ${selector}`);
+    await handle.focus();
+    await target.evaluate((el) => {
+      if (el && "value" in el) el.value = "";
+    }, handle);
+    await page.keyboard.type(String(value ?? ""), { delay: 25 });
+  } catch (e) {
+    console.log(`[bot][${tag}] fallback fill failed:`, errorMessage(e));
+    throw e;
+  } finally {
+    if (handle && typeof handle.dispose === "function") {
+      await handle.dispose();
+    }
+  }
+}
+
+async function readTextInFrame(target, selector, opts = {}) {
+  if (!target) throw new Error("readTextInFrame: target is required");
+  if (!selector) throw new Error("readTextInFrame: selector is required");
+
+  const { timeout = 10000 } = opts;
+  if (isLocatorSupported(target)) {
+    const locator = target.locator(selector);
+    await locator.waitFor({ timeout });
+    const text = await locator.textContent();
+    return String(text || "").trim();
+  }
+
+  const handle = await target.waitForSelector(selector, { timeout });
+  if (!handle) return "";
+  try {
+    return String(
+      await target.evaluate(
+        (el) => (el ? (el.textContent || el.innerText || "") : ""),
+        handle
+      )
+    ).trim();
+  } finally {
+    if (typeof handle.dispose === "function") {
+      await handle.dispose();
+    }
+  }
+}
+
+async function waitForState(page, condition, opts = {}) {
+  const { timeout = 10000 } = opts;
+  if (typeof condition !== "function") {
+    throw new Error("waitForState: condition must be a function");
+  }
+  await page.waitForFunction(condition, { timeout });
+}
+
 async function gotoUrlSafe(page, url, opts = {}) {
   const {
     waitUntil = "domcontentloaded",
@@ -198,9 +354,6 @@ async function safeEvaluate(page, fn, ...args) {
     delayMs = 350,
     tag = "evaluate",
   } = opts;
-
-  // eslint-disable-next-line no-console
-  console.log("page type is ", typeof page);
 
   return withRetry(
     async () => {
@@ -274,6 +427,12 @@ module.exports = {
   safeEvaluate,
   safeWaitForFunction,
   recreatePage,
+  getLiveFrame,
+  withLiveFrame,
+  clickInFrame,
+  fillInFrame,
+  readTextInFrame,
+  waitForState,
   isFrameDetachedError,
   isContextDestroyedError,
   isTargetClosedError,

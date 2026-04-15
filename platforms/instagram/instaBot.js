@@ -40,7 +40,7 @@
 
 const { openPage } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
-const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
+const { gotoUrlSafe, safeEvaluate, clickInFrame } = require("../../core/navigation");
 
 const {
   waitForSelectorOrThrow,
@@ -140,15 +140,7 @@ async function setCaptionAndShareCustom(page, caption) {
     'div:has(> div[role="textbox"][aria-placeholder="문구를 입력하세요..."])';
 
   await waitForSelectorOrThrow(page, captionSel, 30000);
-
-  await safeEvaluate(page, (sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return false;
-    el.scrollIntoView({ block: "center", inline: "center" });
-    el.click();
-    return true;
-  }, captionSel);
-
+  await clickInFrame(page, captionSel, { timeout: 30000, tag: "captionWrapperClick" });
   await sleep(300);
 
   await typeCaptionLexical(page, caption);

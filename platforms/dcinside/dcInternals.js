@@ -23,8 +23,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const { sleep, domClick, setValue } = require("../../core/helpers");
-const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
+const { sleep } = require("../../core/helpers");
+const { gotoUrlSafe, safeEvaluate, clickInFrame, fillInFrame } = require("../../core/navigation");
 
 /** ****************************************************************************
  * URL helpers
@@ -151,14 +151,7 @@ function toPostDate(dateTimeRaw, now = new Date()) {
  * 네이버 검색창에 쿼리 입력
  ******************************************************************************/
 async function naverSearchWithGivenInput(page, query) {
-  await page.waitForSelector("#MM_SEARCH_FAKE", { timeout: 20000 });
-
-  await safeEvaluate(page, () => {
-    const el = document.querySelector("#MM_SEARCH_FAKE");
-    if (el) el.value = "";
-  });
-
-  await page.focus("#MM_SEARCH_FAKE");
+  await fillInFrame(page, "#MM_SEARCH_FAKE", "", { timeout: 20000, tag: "searchInputClear" });
   await page.keyboard.type(query, { delay: 30 });
   await page.keyboard.press("Enter");
 
@@ -186,20 +179,7 @@ async function clickFirstDcinsideResult(page, browser) {
     });
   });
 
-  const clicked = await safeEvaluate(page, () => {
-    const links = Array.from(document.querySelectorAll('a[href]'));
-    const target =
-      links.find((a) => (a.getAttribute("href") || "").includes("m.dcinside.com")) ||
-      links.find((a) => (a.getAttribute("href") || "").includes("dcinside.com"));
-
-    if (!target) return false;
-
-    target.scrollIntoView({ block: "center", inline: "center" });
-    target.click();
-    return true;
-  });
-
-  if (!clicked) throw new Error("dcinside link not found/clicked.");
+  await clickInFrame(page, 'a[href*="m.dcinside.com"], a[href*="dcinside.com"]', { timeout: 25000 });
 
   const navPromise = page
     .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 })
@@ -222,18 +202,19 @@ async function loginDcinside(page, { id, pw } = {}) {
     timeout: 20000,
   });
 
-  const hasAnchor = await page.$('a.mark[href*="msign.dcinside.com/login"]');
-  if (hasAnchor) {
-    await Promise.allSettled([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
-      domClick(page, 'a.mark[href*="msign.dcinside.com/login"]'),
-    ]);
-  } else {
-    await Promise.allSettled([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
-      domClick(page, "span.sign"),
-    ]);
+  const loginAnchorSel = 'a.mark[href*="msign.dcinside.com/login"]';
+  const loginBtnSel = 'span.sign';
+  const loginAnchor = await page.waitForSelector(loginAnchorSel, { timeout: 5000 }).catch(() => null);
+  const loginSelector = loginAnchor ? loginAnchorSel : loginBtnSel;
+
+  if (loginAnchor && typeof loginAnchor.dispose === "function") {
+    await loginAnchor.dispose();
   }
+
+  await Promise.allSettled([
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
+    clickInFrame(page, loginSelector, { timeout: 25000 }),
+  ]);
 
   await setValue(page, 'input#code[name="code"]', id);
   await setValue(page, 'input#password[name="password"]', pw);
@@ -245,22 +226,16 @@ async function loginDcinside(page, { id, pw } = {}) {
 
   await sleep(300);
 
-  const hasCpiboxBtnBox = await page.$("div.cpibox.btn_box");
-  if (hasCpiboxBtnBox) {
-    const targetHref = "https://m.dcinside.com";
-    const clicked = await safeEvaluate(page, (href) => {
-      const box = document.querySelector("div.cpibox.btn_box");
-      if (!box) return false;
-      const a = Array.from(box.querySelectorAll('a[href]')).find((x) => x.getAttribute("href") === href);
-      if (!a) return false;
-      a.scrollIntoView({ block: "center", inline: "center" });
-      a.click();
-      return true;
-    }, targetHref);
-
-    if (clicked) {
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+  const boxLinkSel = 'div.cpibox.btn_box a[href="https://m.dcinside.com"]';
+  const boxLinkExists = await page.waitForSelector(boxLinkSel, { timeout: 5000 }).catch(() => null);
+  if (boxLinkExists) {
+    if (typeof boxLinkExists.dispose === "function") {
+      await boxLinkExists.dispose();
     }
+    await Promise.allSettled([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {}),
+      clickInFrame(page, boxLinkSel, { timeout: 25000 }),
+    ]);
   }
 
   return page;
@@ -285,16 +260,11 @@ async function searchGallary(page, keyword) {
   const before = page.url();
   await Promise.allSettled([
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
-    domClick(page, submitBtnSel),
+    clickInFrame(page, submitBtnSel, { timeout: 25000 }),
   ]);
 
   if (page.url() === before) {
-    await safeEvaluate(page, (inputSel) => {
-      const input = document.querySelector(inputSel);
-      const form = input?.closest("form");
-      if (form && typeof form.submit === "function") form.submit();
-    }, searchAllInputSel);
-
+    await page.keyboard.press("Enter");
     await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
   }
 
@@ -311,15 +281,7 @@ async function clickFirstGalleryFromResult(page) {
 
   const popupPromise = new Promise((resolve) => page.once("popup", resolve));
 
-  const clicked = await safeEvaluate(page, () => {
-    const a = document.querySelector(sel);
-    if (!a) return false;
-    a.scrollIntoView({ block: "center", inline: "center" });
-    a.click();
-    return true;
-  }, firstLinkSel);
-
-  if (!clicked) throw new Error("clickFirstGalleryFromResult: failed to click first gallery link");
+  await clickInFrame(page, firstLinkSel, { timeout: 25000 });
 
   const navPromise = page
     .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 })
@@ -614,26 +576,13 @@ async function writeComment(page, text) {
   const memoSel = "textarea#comment_memo";
   const submitSel = "button.btn-comment-write";
 
-  await page.waitForSelector(memoSel, { timeout: 20000 });
-  await page.focus(memoSel);
-
-  await safeEvaluate(page, (sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.value = "";
-  }, memoSel);
-
+  await fillInFrame(page, memoSel, "", { timeout: 20000, tag: "commentClear" });
   await page.keyboard.type(String(text), { delay: 20 });
 
   const beforeUrl = page.url();
   await Promise.allSettled([
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
-    safeEvaluate(page, (sel) => {
-      const btn = document.querySelector(sel);
-      if (!btn) return false;
-      btn.scrollIntoView({ block: "center", inline: "center" });
-      btn.click();
-      return true;
-    }, submitSel),
+    clickInFrame(page, submitSel, { timeout: 15000 }),
   ]);
 
   if (page.url() === beforeUrl) {

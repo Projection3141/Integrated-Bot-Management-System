@@ -17,7 +17,7 @@
  */
 
 const { sleep, assertReadableFile } = require("../../core/helpers");
-const { gotoUrlSafe, safeEvaluate } = require("../../core/navigation");
+const { gotoUrlSafe, clickInFrame } = require("../../core/navigation");
 
 /** ****************************************************************************
  * selector 대기
@@ -37,18 +37,18 @@ async function clickRoleButtonDivByText(page, text, timeout = 20000) {
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
-    // eslint-disable-next-line no-await-in-loop
-    const clicked = await safeEvaluate(page, (t) => {
-      const nodes = Array.from(document.querySelectorAll('div[role="button"]'));
-      const el = nodes.find((x) => (x.textContent || "").trim() === t);
-      if (!el) return false;
-      el.scrollIntoView({ block: "center", inline: "center" });
-      el.click();
-      return true;
-    }, target);
-
-    if (clicked) return true;
-    // eslint-disable-next-line no-await-in-loop
+    const handles = await page.$$('div[role="button"]');
+    for (const handle of handles) {
+      const label = String(
+        await page.evaluate((el) => (el.textContent || "").trim(), handle)
+      ).trim();
+      if (label === target) {
+        await handle.click();
+        if (typeof handle.dispose === "function") await handle.dispose();
+        return true;
+      }
+      if (typeof handle.dispose === "function") await handle.dispose();
+    }
     await sleep(250);
   }
 
@@ -65,47 +65,39 @@ async function clickRoleButtonDivByText(page, text, timeout = 20000) {
  ******************************************************************************/
 async function clickCreateByIcon(page, timeout = 30000) {
   const start = Date.now();
+  const texts = ["create", "new post", "만들기", "새 게시물"];
 
   while (Date.now() - start < timeout) {
-    // eslint-disable-next-line no-await-in-loop
-    const ok = await safeEvaluate(page, () => {
-      const svg =
-        document.querySelector('svg[aria-label="Create"]') ||
-        document.querySelector('svg[aria-label="New post"]');
-
-      if (svg) {
-        const clickable =
-          svg.closest('a[role="link"]') ||
-          svg.closest("button") ||
-          svg.closest('div[role="button"]') ||
-          svg;
-
-        clickable.scrollIntoView({ block: "center", inline: "center" });
-        clickable.click();
-        return true;
-      }
-
-      const texts = ["create", "new post", "만들기", "새 게시물"];
-      const candidates = Array.from(
-        document.querySelectorAll('a[role="link"], div[role="button"], button')
+    const svgHandle = await page.$('svg[aria-label="Create"], svg[aria-label="New post"]');
+    if (svgHandle) {
+      const clickableHandle = await page.evaluateHandle(
+        (el) => el.closest('a[role="link"], button, div[role="button"]') || el,
+        svgHandle
       );
-
-      const hit = candidates.find((el) => {
-        const t = (el.textContent || "").trim().toLowerCase();
-        return texts.some((k) => t === k || t.includes(k));
-      });
-
-      if (hit) {
-        hit.scrollIntoView({ block: "center", inline: "center" });
-        hit.click();
+      const clickableEl = clickableHandle.asElement();
+      if (clickableEl) {
+        await clickableEl.click();
+        if (typeof clickableEl.dispose === "function") await clickableEl.dispose();
+        if (typeof svgHandle.dispose === "function") await svgHandle.dispose();
         return true;
       }
+      if (typeof clickableHandle.dispose === "function") await clickableHandle.dispose();
+      if (typeof svgHandle.dispose === "function") await svgHandle.dispose();
+    }
 
-      return false;
-    });
+    const handles = await page.$$('a[role="link"], div[role="button"], button');
+    for (const handle of handles) {
+      const text = String(
+        await page.evaluate((el) => (el.textContent || "").trim().toLowerCase(), handle)
+      ).trim();
+      if (texts.some((key) => text === key || text.includes(key))) {
+        await handle.click();
+        if (typeof handle.dispose === "function") await handle.dispose();
+        return true;
+      }
+      if (typeof handle.dispose === "function") await handle.dispose();
+    }
 
-    if (ok) return true;
-    // eslint-disable-next-line no-await-in-loop
     await sleep(250);
   }
 
@@ -119,10 +111,14 @@ async function uploadImageFile(page, imagePath, timeout = 30000) {
   const absPath = await assertReadableFile(imagePath);
 
   await waitForSelectorOrThrow(page, 'input[type="file"]', timeout);
-  const input = await page.$('input[type="file"]');
+  const input = await page.waitForSelector('input[type="file"]', { timeout });
   if (!input) throw new Error("uploadImageFile: file input handle not found");
 
   await input.uploadFile(absPath);
+  if (typeof input.dispose === "function") {
+    await input.dispose();
+  }
+
   await sleep(900);
 
   return absPath;
@@ -144,23 +140,8 @@ async function typeCaptionLexical(page, caption) {
     'div[role="textbox"][aria-placeholder="문구를 입력하세요..."][data-lexical-editor="true"]';
 
   await page.waitForSelector(editorSel, { timeout: 30000 });
-
-  const debug = await safeEvaluate(page, (sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return { ok: false, reason: "editor_not_found" };
-
-    el.scrollIntoView({ block: "center", inline: "center" });
-    el.click();
-    el.focus?.();
-
-    return { ok: true, className: el.className || "(no class)" };
-  }, editorSel);
-
-  if (!debug?.ok) {
-    throw new Error(`[caption] focus failed: ${debug?.reason || "unknown"}`);
-  }
-
-  console.log("[insta][caption] editor clicked:", debug.className);
+  await clickInFrame(page, editorSel, { timeout: 30000, tag: "typeCaptionFocus" });
+  await page.focus(editorSel);
 
   await page.keyboard.down("Control");
   await page.keyboard.press("KeyA");
