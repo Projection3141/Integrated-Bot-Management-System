@@ -72,8 +72,10 @@ function getHistoryDir() {
 /** ****************************************************************************
  * 이력 파일 경로 반환
  * @returns {string} 이력 파일 경로
- * 로직: getHistoryDir()와 path.join을 사용하여 "history.log" 파일 경로를 구성
  ******************************************************************************/
+function getHistoryFile() {
+  return path.join(getHistoryDir(), "history.log");
+}
 
 /** ****************************************************************************
  * 계정 저장 경로
@@ -325,6 +327,55 @@ function pushLog(key, level, message) {
 }
 
 /** ****************************************************************************
+ * 상태 부분 업데이트
+ ******************************************************************************/
+function patchBotState(key, patch) {
+  BOT_STATE[key] = {
+    ...BOT_STATE[key],
+    ...patch,
+  };
+  sendStatus(key);
+}
+
+/** ****************************************************************************
+ * runner 로그 -> UI 상태 변환
+ ******************************************************************************/
+function inferRuntimeStatusFromLog(key, message) {
+  const msg = String(message || "");
+
+  if (key === "reddit") {
+    if (msg.includes("[runReddit] waiting for manual login")) {
+      return "waiting_login";
+    }
+
+    if (
+      msg.includes("[runReddit] login detected") ||
+      msg.includes("[runReddit] comment job starting")
+    ) {
+      return "running";
+    }
+
+    if (
+      msg.includes("[runReddit] no comment job config, standby after login") ||
+      msg.includes("[runReddit] entering post-run-standby")
+    ) {
+      return "standby";
+    }
+  }
+
+  return null;
+}
+
+function applyRuntimeStatusFromLog(key, message) {
+  const nextStatus = inferRuntimeStatusFromLog(key, message);
+  if (!nextStatus) return;
+
+  if (BOT_STATE[key]?.status !== nextStatus) {
+    patchBotState(key, { status: nextStatus });
+  }
+}
+
+/** ****************************************************************************
  * 종료 이벤트 1회 대기
  *
  * utilityProcess: exit 중심
@@ -521,22 +572,43 @@ function bindChildLifecycle(key, child) {
  * child process stdout/stderr 연결
  *
  * 단계:
- *  1) stdout chunk 수신
- *  2) stderr chunk 수신
- *  3) UI로 전달
+ *  1) line buffer로 stdout/stderr 분리
+ *  2) UI 로그 전송
+ *  3) 특정 로그 패턴이면 상태 갱신
  ******************************************************************************/
 function attachChildLogStream(key, child) {
-  if (child.stdout) {
-    child.stdout.on("data", (buf) => {
-      pushLog(key, "info", buf.toString("utf8"));
+  function bindStream(stream, level) {
+    if (!stream) return;
+
+    let buffer = "";
+
+    stream.on("data", (buf) => {
+      buffer += buf.toString("utf8");
+
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const text = String(line || "");
+        if (!text.trim()) continue;
+
+        pushLog(key, level, text);
+        applyRuntimeStatusFromLog(key, text);
+      }
+    });
+
+    stream.on("end", () => {
+      const text = String(buffer || "");
+      if (!text.trim()) return;
+
+      pushLog(key, level, text);
+      applyRuntimeStatusFromLog(key, text);
+      buffer = "";
     });
   }
 
-  if (child.stderr) {
-    child.stderr.on("data", (buf) => {
-      pushLog(key, "error", buf.toString("utf8"));
-    });
-  }
+  bindStream(child.stdout, "info");
+  bindStream(child.stderr, "error");
 }
 
 /** ****************************************************************************
@@ -605,7 +677,7 @@ async function startBot(key, options = {}) {
 
   BOT_STATE[key] = {
     ...BOT_STATE[key],
-    status: "running",
+    status: "starting",
     pid: child.pid || null,
     startedAt: new Date().toISOString(),
     exitCode: null,

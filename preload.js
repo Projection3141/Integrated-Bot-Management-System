@@ -54,13 +54,4 @@ contextBridge.exposeInMainWorld("botAPI", {
   /** 실행 이력 가져오기 */
   getHistory: () => ipcRenderer.invoke("bot:getHistory"),
 
-  /** 계정 목록 가져오기 */
-  listAccounts: () => ipcRenderer.invoke("account:list"),
-
-  /** 계정 추가 */
-  addAccount: (name, username, password) =>
-    ipcRenderer.invoke("account:add", name, username, password),
-
-  /** 계정 삭제 */
-  removeAccount: (name) => ipcRenderer.invoke("account:remove", name),
 });

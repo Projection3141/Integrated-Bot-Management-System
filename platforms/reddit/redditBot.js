@@ -28,14 +28,12 @@ const {
   gotoUrlSafe,
   safeWaitNetworkIdle,
   safeEvaluate,
+  waitForState,
 } = require("../../core/navigation");
 
 const {
   buildSearchUrl,
   buildTextSubmitUrlFromPickValue,
-
-  setFaceplateTextInputById,
-  clickLoginButton,
 
   setTitleFaceplateTextarea,
   setBodyLexicalRTE,
@@ -85,41 +83,117 @@ async function enterSite({
 }
 
 /** ****************************************************************************
- * 2) Reddit 로그인
+ * Reddit 로그인 상태 감지
  *
- * 단계:
- *  - login URL로 안전 이동
- *  - username shadow input 입력
- *  - password shadow input 입력
- *  - 로그인 버튼 클릭
- *  - network idle 대기
- *
- * 반환:
- *  - 최신 page 객체
+ * 기준:
+ *  - login 페이지가 아님
+ *  - 로그인 버튼류가 보이지 않음
+ *  - 우측 상단 user/account 관련 버튼 또는 작성 관련 UI 존재
  ******************************************************************************/
-async function loginRedditAuto(page, { username, password } = {}) {
-  if (!username) throw new Error("loginRedditAuto: username is required");
-  if (!password) throw new Error("loginRedditAuto: password is required");
+async function isRedditLoggedIn(page) {
+  if (!page) throw new Error("isRedditLoggedIn: page is required");
 
-  page = await gotoUrlSafe(page, "https://www.reddit.com/login/", {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
+  const result = await safeEvaluate(page, () => {
+    const href = String(location.href || "");
+    const bodyText = String(document.body?.innerText || "");
 
-  await setFaceplateTextInputById(page, "login-username", username, 30000);
-  await sleep(150);
-  await setFaceplateTextInputById(page, "login-password", password, 30000);
-  await sleep(200);
+    /** 로그인 페이지면 아직 미로그인으로 처리 */
+    if (href.includes("/login")) {
+      return {
+        ok: false,
+        reason: "LOGIN_URL",
+        href,
+      };
+    }
 
-  await clickLoginButton(page, 30000);
-  await safeWaitNetworkIdle(page, 20000);
-  await sleep(600);
+    /** 로그인 버튼/문구가 강하게 보이면 미로그인 가능성 높음 */
+    const loginTexts = ["Log in", "Log In", "Sign in", "Sign In", "로그인"];
+    const hasLoginText = loginTexts.some((txt) => bodyText.includes(txt));
 
-  return page;
+    /** 로그인 후 보일 가능성이 높은 UI 후보 */
+    const loggedInSelectors = [
+      "button[aria-label*='Open user menu']",
+      "button[aria-label*='user menu']",
+      "a[href^='/user/']",
+      "a[href^='/submit']",
+      "button[aria-label*='Create']",
+      "faceplate-tracker[noun='create_post']",
+      "shreddit-post-composer",
+    ];
+
+    const hasLoggedInUi = loggedInSelectors.some((sel) => document.querySelector(sel));
+
+    return {
+      ok: Boolean(!hasLoginText && hasLoggedInUi),
+      reason: !hasLoginText && hasLoggedInUi ? "LOGGED_IN_UI" : "NOT_CONFIRMED",
+      href,
+      hasLoginText,
+      hasLoggedInUi,
+    };
+  }, { tag: "reddit.isLoggedIn" });
+
+  return Boolean(result?.ok);
 }
 
 /** ****************************************************************************
- * 3) 검색 + 스크롤
+ * Reddit 로그인 완료 대기
+ *
+ * 설명:
+ *  - 사용자가 수동 로그인할 때까지 기다림
+ *  - 로그인 완료 감지 시 최신 page 반환
+ ******************************************************************************/
+async function waitForRedditLogin(page, opts = {}) {
+  if (!page) throw new Error("waitForRedditLogin: page is required");
+
+  const {
+    timeout = 10 * 60 * 1000,
+    checkInterval = 1000,
+    loginUrl = "https://www.reddit.com/login/",
+  } = opts;
+
+  page = await gotoUrlSafe(page, loginUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+    tag: "reddit.waitLogin.goto",
+  });
+
+  await safeWaitNetworkIdle(page, 10000);
+
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    const loggedIn = await isRedditLoggedIn(page);
+
+    if (loggedIn) {
+      await safeWaitNetworkIdle(page, 10000);
+      await sleep(500);
+      return page;
+    }
+
+    await sleep(checkInterval);
+  }
+
+  throw new Error("waitForRedditLogin: timeout");
+}
+
+/** ****************************************************************************
+ * Reddit 로그인 보장
+ *
+ * 설명:
+ *  - 이미 로그인 상태면 바로 통과
+ *  - 아니면 로그인 대기로 전환
+ ******************************************************************************/
+async function ensureRedditLoggedIn(page, opts = {}) {
+  if (!page) throw new Error("ensureRedditLoggedIn: page is required");
+
+  const loggedIn = await isRedditLoggedIn(page);
+  if (loggedIn) return page;
+
+  return waitForRedditLogin(page, opts);
+}
+
+/** ****************************************************************************
+ * 검색 + 스크롤
  *
  * 단계:
  *  - 검색 URL 생성
@@ -129,6 +203,8 @@ async function loginRedditAuto(page, { username, password } = {}) {
  ******************************************************************************/
 async function searchAndScroll(page, { keyword, rounds = 4, delayMs = 900 } = {}) {
   if (!keyword) throw new Error("searchAndScroll: keyword is required");
+
+  page = await ensureRedditLoggedIn(page);
 
   page = await gotoUrlSafe(page, buildSearchUrl(keyword), {
     waitUntil: "domcontentloaded",
@@ -159,6 +235,8 @@ async function enterSubreddit(page, subredditName) {
 
   const url = `https://www.reddit.com/r/${encodeURIComponent(String(subredditName))}/`;
 
+  page = await ensureRedditLoggedIn(page);
+
   page = await gotoUrlSafe(page, url, {
     waitUntil: "domcontentloaded",
     timeout: 30000,
@@ -185,6 +263,8 @@ async function createTextPost(page, { pickValue, title, body } = {}) {
 
   const submitUrl = buildTextSubmitUrlFromPickValue(pickValue);
   console.log("[reddit][post] direct submit url:", submitUrl);
+
+  page = await ensureRedditLoggedIn(page);
 
   page = await gotoUrlSafe(page, submitUrl, {
     waitUntil: "domcontentloaded",
@@ -222,6 +302,8 @@ async function createComment(page, { url, commentText } = {}) {
   if (!page) throw new Error("createComment: page is required");
   if (!url) throw new Error("createComment: url is required");
   if (!commentText) throw new Error("createComment: commentText is required");
+
+  page = await ensureRedditLoggedIn(page);
 
   page = await gotoUrlSafe(page, url, {
     waitUntil: "domcontentloaded",
@@ -268,7 +350,7 @@ function parseDateRange(range) {
 
   const from = toEpoch(startRaw);
   const to = toEpoch(endRaw || startRaw);
-   
+
   return { from, to };
 }
 
@@ -285,6 +367,8 @@ async function commentOnSearchResults(
   if (!commentText) throw new Error("commentOnSearchResults: commentText is required");
   if (!count || count <= 0) return page;
 
+  page = await ensureRedditLoggedIn(page);
+
   const { from, to } = parseDateRange(dateRange);
   const q = encodeURIComponent(String(keyword).trim());
   const url = `/r/${encodeURIComponent(subreddit)}/search.json?q=${q}&restrict_sr=1&sort=new&limit=100`;
@@ -298,17 +382,18 @@ async function commentOnSearchResults(
       return r.json();
     },
     url,
+    { tag: "reddit.searchFetch" }
   );
 
   const items = Array.isArray(res?.data?.children)
     ? res.data.children.map((c) => {
-        const d = c?.data || {};
-        return {
-          title: d.title || "",
-          url: d.permalink ? `https://www.reddit.com${d.permalink}` : null,
-          createdUtc: Number(d.created_utc) || 0,
-        };
-      })
+      const d = c?.data || {};
+      return {
+        title: d.title || "",
+        url: d.permalink ? `https://www.reddit.com${d.permalink}` : null,
+        createdUtc: Number(d.created_utc) || 0,
+      };
+    })
     : [];
 
   const matches = items.filter((item) => {
@@ -317,7 +402,6 @@ async function commentOnSearchResults(
     const kw = String(keyword || "").toLowerCase();
 
     if (!title.includes(kw)) return false;
-
     if (from && item.createdUtc < from) return false;
     if (to && item.createdUtc > to) return false;
 
@@ -339,7 +423,9 @@ async function commentOnSearchResults(
 module.exports = {
   enterSite,
   gotoUrlSafe,
-  loginRedditAuto,
+  isRedditLoggedIn,
+  waitForRedditLogin,
+  ensureRedditLoggedIn,
   searchAndScroll,
   enterSubreddit,
   createTextPost,

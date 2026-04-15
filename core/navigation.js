@@ -44,6 +44,36 @@ function isTargetClosedError(e) {
   );
 }
 
+function isPageClosed(page) {
+  try {
+    return !page || typeof page.isClosed !== "function" || page.isClosed();
+  } catch {
+    return true;
+  }
+}
+
+function canRecoverPageError(e) {
+  return (
+    isFrameDetachedError(e) ||
+    isContextDestroyedError(e) ||
+    isTargetClosedError(e)
+  );
+}
+
+async function recoverPage(page, tag = "recoverPage") {
+  if (!page) throw new Error(`${tag}: page is required`);
+
+  const meta = page.__botMeta || {};
+
+  /** page 자체가 닫혔거나 target이 죽었으면 recreate 시도 */
+  try {
+    return await recreatePage(page, meta);
+  } catch (e) {
+    console.log(`[bot][${tag}] recreate failed:`, errorMessage(e));
+    throw e;
+  }
+}
+
 async function withRetry(fn, { tries = 3, delayMs = 500, tag = "retry" } = {}) {
   let lastErr = null;
 
@@ -71,7 +101,7 @@ async function withRetry(fn, { tries = 3, delayMs = 500, tag = "retry" } = {}) {
 async function safeWaitNetworkIdle(page, timeout = 15000) {
   try {
     await page.waitForNetworkIdle({ idleTime: 800, timeout });
-  } catch {}
+  } catch { }
 }
 
 async function waitForSelectorSafe(page, selector, timeout = 20000) {
@@ -113,19 +143,19 @@ async function recreatePage(page, meta = {}) {
   if (extraHTTPHeaders && typeof extraHTTPHeaders === "object") {
     try {
       await newPage.setExtraHTTPHeaders(extraHTTPHeaders);
-    } catch {}
+    } catch { }
   }
 
   if (viewport) {
     try {
       await newPage.setViewport(viewport);
-    } catch {}
+    } catch { }
   }
 
   if (timezone) {
     try {
       await newPage.emulateTimezone(timezone);
-    } catch {}
+    } catch { }
   }
 
   newPage.on("framedetached", () => console.log(`[bot][${tag}] framedetached`));
@@ -143,7 +173,7 @@ async function recreatePage(page, meta = {}) {
     if (!page.isClosed()) {
       await page.close({ runBeforeUnload: false });
     }
-  } catch {}
+  } catch { }
 
   return newPage;
 }
@@ -158,30 +188,47 @@ function isLocatorSupported(target) {
 }
 
 function getPageFromTarget(target) {
-  if (target && typeof target.page === "function") {
+  if (!target) return null;
+
+  /** Page 자체 */
+  if (target.keyboard && typeof target.waitForSelector === "function") {
+    return target;
+  }
+
+  /** Frame 등 page() 제공 객체 */
+  if (typeof target.page === "function") {
     try {
-      return target.page();
+      const page = target.page();
+      return page || null;
     } catch {
-      return target;
+      return null;
     }
   }
-  return target;
+
+  return null;
 }
 
 async function getLiveFrame(page, predicate, opts = {}) {
   if (!page) throw new Error("getLiveFrame: page is required");
-  if (typeof predicate !== "function") throw new Error("getLiveFrame: predicate must be a function");
+  if (typeof predicate !== "function") {
+    throw new Error("getLiveFrame: predicate must be a function");
+  }
 
   const { timeout = 10000, pollInterval = 100, tag = "getLiveFrame" } = opts;
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
+    if (isPageClosed(page)) {
+      throw new Error("getLiveFrame: page is closed");
+    }
+
     try {
       const frame = page.frames().find((f) => !f.isDetached() && predicate(f));
       if (frame) return frame;
     } catch (e) {
       console.log(`[bot][${tag}] frame discovery error:`, errorMessage(e));
     }
+
     await sleep(pollInterval);
   }
 
@@ -213,87 +260,141 @@ async function clickInFrame(target, selector, opts = {}) {
   if (!target) throw new Error("clickInFrame: target is required");
   if (!selector) throw new Error("clickInFrame: selector is required");
 
-  const { timeout = 10000, tag = "clickInFrame" } = opts;
-  if (isLocatorSupported(target)) {
-    const locator = target.locator(selector);
-    await locator.waitFor({ timeout });
-    await locator.click();
-    return;
-  }
+  const {
+    timeout = 10000,
+    tries = 3,
+    delayMs = 250,
+    tag = "clickInFrame",
+  } = opts;
 
-  let handle = null;
-  try {
-    handle = await target.waitForSelector(selector, { timeout });
-    if (!handle) throw new Error(`clickInFrame: selector not found ${selector}`);
-    await handle.click();
-  } catch (e) {
-    console.log(`[bot][${tag}] fallback click failed:`, errorMessage(e));
-    throw e;
-  } finally {
-    if (handle && typeof handle.dispose === "function") {
-      await handle.dispose();
-    }
-  }
+  return withRetry(
+    async () => {
+      if (isLocatorSupported(target)) {
+        const locator = target.locator(selector);
+        await locator.waitFor({ timeout });
+        await locator.click();
+        return true;
+      }
+
+      let handle = null;
+      try {
+        handle = await target.waitForSelector(selector, { timeout, visible: true });
+        if (!handle) {
+          throw new Error(`clickInFrame: selector not found ${selector}`);
+        }
+
+        await handle.click();
+        return true;
+      } finally {
+        if (handle && typeof handle.dispose === "function") {
+          await handle.dispose().catch(() => { });
+        }
+      }
+    },
+    { tries, delayMs, tag }
+  );
 }
 
 async function fillInFrame(target, selector, value, opts = {}) {
   if (!target) throw new Error("fillInFrame: target is required");
   if (!selector) throw new Error("fillInFrame: selector is required");
 
-  const { timeout = 10000, tag = "fillInFrame" } = opts;
-  if (isLocatorSupported(target)) {
-    const locator = target.locator(selector);
-    await locator.waitFor({ timeout });
-    await locator.fill(String(value ?? ""));
-    return;
-  }
+  const {
+    timeout = 10000,
+    tries = 3,
+    delayMs = 250,
+    tag = "fillInFrame",
+  } = opts;
 
-  let handle = null;
-  const page = getPageFromTarget(target);
-  try {
-    handle = await target.waitForSelector(selector, { timeout });
-    if (!handle) throw new Error(`fillInFrame: selector not found ${selector}`);
-    await handle.focus();
-    await target.evaluate((el) => {
-      if (el && "value" in el) el.value = "";
-    }, handle);
-    await page.keyboard.type(String(value ?? ""), { delay: 25 });
-  } catch (e) {
-    console.log(`[bot][${tag}] fallback fill failed:`, errorMessage(e));
-    throw e;
-  } finally {
-    if (handle && typeof handle.dispose === "function") {
-      await handle.dispose();
-    }
-  }
+  return withRetry(
+    async () => {
+      if (isLocatorSupported(target)) {
+        const locator = target.locator(selector);
+        await locator.waitFor({ timeout });
+        await locator.fill(String(value ?? ""));
+        return true;
+      }
+
+      let handle = null;
+      const page = getPageFromTarget(target);
+
+      if (!page?.keyboard) {
+        throw new Error("fillInFrame: keyboard-capable page not found");
+      }
+
+      try {
+        handle = await target.waitForSelector(selector, { timeout, visible: true });
+        if (!handle) {
+          throw new Error(`fillInFrame: selector not found ${selector}`);
+        }
+
+        await handle.focus();
+
+        await target.evaluate((el) => {
+          if (!el) return;
+          if ("value" in el) {
+            el.value = "";
+          } else if (el.getAttribute?.("contenteditable") === "true") {
+            el.textContent = "";
+          }
+        }, handle);
+
+        await page.keyboard.down("Control");
+        await page.keyboard.press("KeyA");
+        await page.keyboard.up("Control");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.type(String(value ?? ""), { delay: 25 });
+
+        return true;
+      } finally {
+        if (handle && typeof handle.dispose === "function") {
+          await handle.dispose().catch(() => { });
+        }
+      }
+    },
+    { tries, delayMs, tag }
+  );
 }
 
 async function readTextInFrame(target, selector, opts = {}) {
   if (!target) throw new Error("readTextInFrame: target is required");
   if (!selector) throw new Error("readTextInFrame: selector is required");
 
-  const { timeout = 10000 } = opts;
-  if (isLocatorSupported(target)) {
-    const locator = target.locator(selector);
-    await locator.waitFor({ timeout });
-    const text = await locator.textContent();
-    return String(text || "").trim();
-  }
+  const {
+    timeout = 10000,
+    tries = 3,
+    delayMs = 200,
+    tag = "readTextInFrame",
+  } = opts;
 
-  const handle = await target.waitForSelector(selector, { timeout });
-  if (!handle) return "";
-  try {
-    return String(
-      await target.evaluate(
-        (el) => (el ? (el.textContent || el.innerText || "") : ""),
-        handle
-      )
-    ).trim();
-  } finally {
-    if (typeof handle.dispose === "function") {
-      await handle.dispose();
-    }
-  }
+  return withRetry(
+    async () => {
+      if (isLocatorSupported(target)) {
+        const locator = target.locator(selector);
+        await locator.waitFor({ timeout });
+        const text = await locator.textContent();
+        return String(text || "").trim();
+      }
+
+      let handle = null;
+      try {
+        handle = await target.waitForSelector(selector, { timeout });
+        if (!handle) return "";
+
+        return String(
+          await target.evaluate(
+            (el) => (el ? (el.textContent || el.innerText || "") : ""),
+            handle
+          )
+        ).trim();
+      } finally {
+        if (handle && typeof handle.dispose === "function") {
+          await handle.dispose().catch(() => { });
+        }
+      }
+    },
+    { tries, delayMs, tag }
+  );
 }
 
 async function waitForState(page, condition, opts = {}) {
@@ -308,25 +409,35 @@ async function gotoUrlSafe(page, url, opts = {}) {
   const {
     waitUntil = "domcontentloaded",
     timeout = 30000,
+    tries = 5,
+    delayMs = 350,
+    tag = "goto",
   } = opts;
 
+  let currentPage = page;
   let lastErr = null;
 
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < tries; i += 1) {
     try {
-      await page.goto(String(url), { waitUntil, timeout });
-      return page;
+      if (isPageClosed(currentPage)) {
+        currentPage = await recoverPage(currentPage, `${tag}:closed`);
+      }
+
+      await currentPage.goto(String(url), { waitUntil, timeout });
+      return currentPage;
     } catch (e) {
       lastErr = e;
-      console.log(`[bot][goto] fail(${i + 1}/3):`, errorMessage(e));
+      console.log(`[bot][${tag}] fail(${i + 1}/${tries}):`, errorMessage(e));
 
-      if (isFrameDetachedError(e)) {
-        // page = await recreatePage(page, page.__botMeta || {});
-        await sleep(350);
+      if (i === tries - 1) break;
+
+      if (canRecoverPageError(e)) {
+        currentPage = await recoverPage(currentPage, `${tag}:recover`);
+        await sleep(delayMs);
         continue;
       }
 
-      await sleep(450);
+      await sleep(delayMs);
     }
   }
 
@@ -355,12 +466,31 @@ async function safeEvaluate(page, fn, ...args) {
     tag = "evaluate",
   } = opts;
 
-  return withRetry(
-    async () => {
-      return await page.evaluate(fn, ...args);
-    },
-    { tries, delayMs, tag }
-  );
+  let currentPage = page;
+  let lastErr = null;
+
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      if (isPageClosed(currentPage)) {
+        currentPage = await recoverPage(currentPage, `${tag}:closed`);
+      }
+
+      return await currentPage.evaluate(fn, ...args);
+    } catch (e) {
+      lastErr = e;
+      console.log(`[bot][${tag}] fail(${i + 1}/${tries}):`, errorMessage(e));
+
+      if (i === tries - 1) break;
+
+      if (canRecoverPageError(e)) {
+        currentPage = await recoverPage(currentPage, `${tag}:recover`);
+      }
+
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastErr;
 }
 
 /**
@@ -371,7 +501,6 @@ async function safeEvaluate(page, fn, ...args) {
  *  - frame detach / context destroy 시 retry
  */
 async function safeWaitForFunction(page, fn, opts = {}) {
-
   const {
     timeout = 30000,
     tries = 4,
@@ -379,41 +508,30 @@ async function safeWaitForFunction(page, fn, opts = {}) {
     tag = "waitForFunction",
   } = opts;
 
+  let currentPage = page;
   let lastErr = null;
 
-  for (let i = 0; i < tries; i++) {
-
+  for (let i = 0; i < tries; i += 1) {
     try {
+      if (isPageClosed(currentPage)) {
+        currentPage = await recoverPage(currentPage, `${tag}:closed`);
+      }
 
-      await page.waitForFunction(fn, { timeout });
-
-      return page;
-
+      await currentPage.waitForFunction(fn, { timeout });
+      return currentPage;
     } catch (e) {
-
       lastErr = e;
 
       console.log(`[bot][${tag}] fail(${i + 1}/${tries}):`, errorMessage(e));
 
-      if (isFrameDetachedError(e)) {
+      if (i === tries - 1) break;
 
-        page = await recreatePage(page, page.__botMeta || {});
-        await sleep(delayMs);
-        continue;
-
+      if (canRecoverPageError(e)) {
+        currentPage = await recoverPage(currentPage, `${tag}:recover`);
       }
 
-      if (isContextDestroyedError(e)) {
-
-        await sleep(delayMs);
-        continue;
-
-      }
-
-      throw e;
-
+      await sleep(delayMs);
     }
-
   }
 
   throw lastErr;
@@ -427,6 +545,9 @@ module.exports = {
   safeEvaluate,
   safeWaitForFunction,
   recreatePage,
+  recoverPage,
+  canRecoverPageError,
+  isPageClosed,
   getLiveFrame,
   withLiveFrame,
   clickInFrame,

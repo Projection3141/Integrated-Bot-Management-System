@@ -21,7 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { clickInFrame, fillInFrame } = require("./navigation");
+const { clickInFrame, fillInFrame, withLiveFrame } = require("./navigation");
 
 /** ****************************************************************************
  * 시간 지연
@@ -99,20 +99,71 @@ async function assertReadableFile(targetPath, opts = {}) {
 }
 
 /** ****************************************************************************
+ * DOM action target 결정
+ *
+ * 설명:
+ *  - 기본: 전달받은 page/frame 자체를 사용
+ *  - framePredicate가 있으면 page 기준으로 live frame 재획득 후 사용
+ ******************************************************************************/
+async function withDomTarget(pageOrFrame, task, opts = {}) {
+  if (!pageOrFrame) throw new Error("withDomTarget: pageOrFrame is required");
+  if (typeof task !== "function") throw new Error("withDomTarget: task must be a function");
+
+  const {
+    framePredicate,
+    timeout = 10000,
+    pollInterval = 100,
+    tag = "withDomTarget",
+  } = opts;
+
+  /** framePredicate가 없으면 현재 target 그대로 사용 */
+  if (typeof framePredicate !== "function") {
+    return task(pageOrFrame);
+  }
+
+  /** framePredicate를 쓸 때는 page가 필요 */
+  if (typeof pageOrFrame.frames !== "function") {
+    throw new Error("withDomTarget: framePredicate requires a page target");
+  }
+
+  return withLiveFrame(
+    pageOrFrame,
+    framePredicate,
+    async (frame) => task(frame),
+    { timeout, pollInterval, tag: `${tag}:frame` }
+  );
+}
+
+/** ****************************************************************************
  * 일반 DOM 클릭
  *
  * 설명:
- *  - selector를 즉시 클릭
- *  - locator/selector 기반 공통 액션 사용
+ *  - 기본은 전달받은 page/frame target에서 클릭
+ *  - framePredicate가 있으면 live frame 재획득 후 클릭
  *
  * 용도:
- *  - DCInside 같은 일반 DOM 기반 사이트
+ *  - 일반 DOM 기반 사이트
+ *  - iframe 내부 일반 DOM 액션 공통 처리
  ******************************************************************************/
-async function domClick(page, selector) {
-  if (!page) throw new Error("domClick: page is required");
+async function domClick(pageOrFrame, selector, opts = {}) {
+  if (!pageOrFrame) throw new Error("domClick: pageOrFrame is required");
   if (!selector) throw new Error("domClick: selector is required");
 
-  await clickInFrame(page, selector, { tag: "domClick" });
+  const {
+    timeout = 10000,
+    pollInterval = 100,
+    framePredicate,
+    tag = "domClick",
+  } = opts;
+
+  await withDomTarget(
+    pageOrFrame,
+    async (target) => {
+      await clickInFrame(target, selector, { timeout, tag });
+    },
+    { framePredicate, timeout, pollInterval, tag }
+  );
+
   return true;
 }
 
@@ -120,17 +171,32 @@ async function domClick(page, selector) {
  * 일반 input/textarea 값 입력
  *
  * 설명:
- *  - selector 대기
- *  - fillInFrame 기반 값 설정
+ *  - 기본은 전달받은 page/frame target에서 값 입력
+ *  - framePredicate가 있으면 live frame 재획득 후 입력
  *
  * 용도:
  *  - 일반 입력 필드
+ *  - iframe 내부 일반 DOM 입력 공통 처리
  ******************************************************************************/
-async function setValue(page, selector, value, { timeout = 20000 } = {}) {
-  if (!page) throw new Error("setValue: page is required");
+async function setValue(pageOrFrame, selector, value, opts = {}) {
+  if (!pageOrFrame) throw new Error("setValue: pageOrFrame is required");
   if (!selector) throw new Error("setValue: selector is required");
 
-  await fillInFrame(page, selector, String(value ?? ""), { timeout, tag: "setValue" });
+  const {
+    timeout = 20000,
+    pollInterval = 100,
+    framePredicate,
+    tag = "setValue",
+  } = opts;
+
+  await withDomTarget(
+    pageOrFrame,
+    async (target) => {
+      await fillInFrame(target, selector, String(value ?? ""), { timeout, tag });
+    },
+    { framePredicate, timeout, pollInterval, tag }
+  );
+
   return true;
 }
 

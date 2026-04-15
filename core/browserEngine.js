@@ -4,12 +4,13 @@
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 
 const { ensureDir } = require("./helpers");
-const { gotoUrlSafe, waitForSelectorSafe, safeWaitForFunction } = require("./navigation");
+const { gotoUrlSafe, waitForSelectorSafe } = require("./navigation");
 
 function attachFrameLifecycleDebug(page, opts = {}) {
   const tag = opts.tag || page.__botMeta?.tag || "page";
@@ -28,7 +29,7 @@ function attachFrameLifecycleDebug(page, opts = {}) {
       .target()
       .createCDPSession()
       .then((client) => {
-        client.send("Page.enable").catch(() => {});
+        client.send("Page.enable").catch(() => { });
         client.on("Page.frameAttached", (payload) => {
           console.log(`[bot][${tag}:cdp] frameAttached id=${payload.frameId}`);
         });
@@ -39,7 +40,7 @@ function attachFrameLifecycleDebug(page, opts = {}) {
           console.log(`[bot][${tag}:cdp] frameDetached id=${payload.frameId}`);
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 }
 
@@ -255,6 +256,8 @@ async function applyPageContext(page, opts = {}) {
     useMobile,
     userAgent,
   };
+
+  return page;
 }
 
 /** ****************************************************************************
@@ -287,6 +290,29 @@ async function enforceMaxBrowsers() {
 }
 
 /** ****************************************************************************
+ * browser disconnect 정리
+ ******************************************************************************/
+function attachBrowserDisconnectCleanup(browser, { storageKey, isTemp = false } = {}) {
+  if (!browser || typeof browser.on !== "function") return;
+
+  browser.on("disconnected", () => {
+    try {
+      if (isTemp) {
+        TEMP_BROWSERS.delete(browser);
+        return;
+      }
+
+      const entry = BROWSER_CACHE.get(storageKey);
+      if (entry?.browser === browser) {
+        BROWSER_CACHE.delete(storageKey);
+      }
+    } catch {
+      /** ignore */
+    }
+  });
+}
+
+/** ****************************************************************************
  * browser 획득
  ******************************************************************************/
 async function getBrowser(opts = {}) {
@@ -305,6 +331,7 @@ async function getBrowser(opts = {}) {
 
   if (userDataDirMode === "persistent") {
     const cached = BROWSER_CACHE.get(storageKey);
+
     if (cached?.browser?.isConnected?.()) {
       touchLRU(storageKey);
       return {
@@ -314,6 +341,10 @@ async function getBrowser(opts = {}) {
         localeProfile,
         isTemp: false,
       };
+    }
+
+    if (cached) {
+      BROWSER_CACHE.delete(storageKey);
     }
   }
 
@@ -329,7 +360,7 @@ async function getBrowser(opts = {}) {
   });
 
   const browser = await puppeteerExtra.launch({
-    headless, // true : 브라우저 창 숨김, false : 브라우저 창 표시
+    headless,
     userDataDir,
     args,
     defaultViewport: d.ui?.defaultViewportNull ? null : { width, height },
@@ -342,9 +373,20 @@ async function getBrowser(opts = {}) {
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
     });
+
+    attachBrowserDisconnectCleanup(browser, {
+      storageKey,
+      isTemp: false,
+    });
+
     await enforceMaxBrowsers();
   } else {
     TEMP_BROWSERS.add(browser);
+
+    attachBrowserDisconnectCleanup(browser, {
+      storageKey,
+      isTemp: true,
+    });
   }
 
   return {
@@ -401,7 +443,7 @@ async function openPage(opts = {}) {
     finalUserAgent = d.mobile.userAgent || null;
   }
 
-  await applyPageContext(page, {
+  page = await applyPageContext(page, {
     viewport: finalViewport,
     acceptLanguage: localeProfile.acceptLanguage,
     timezone: localeProfile.timezone,
@@ -410,9 +452,10 @@ async function openPage(opts = {}) {
     useMobile,
   });
 
-  await gotoUrlSafe(page, url, {
+  page = await gotoUrlSafe(page, url, {
     waitUntil: "domcontentloaded",
     timeout: 30000,
+    tag: `${tag}:goto`,
   });
 
   await waitForSelectorSafe(page, "body", 25000);

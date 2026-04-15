@@ -20,7 +20,6 @@
 
 const { sleep } = require("../../core/helpers");
 const {
-  withRetry,
   safeWaitNetworkIdle,
   safeEvaluate,
   waitForSelectorSafe,
@@ -65,85 +64,28 @@ function buildTextSubmitUrlFromPickValue(pickValue) {
 }
 
 /** ****************************************************************************
- * 로그인 faceplate input 입력
+ * 포커스된 편집기에 텍스트 입력
  ******************************************************************************/
-async function setFaceplateTextInputById(page, hostId, value, timeout = 20000) {
-  const hostSel = `faceplate-text-input#${String(hostId)}`;
-  await waitForSelectorSafe(page, hostSel, timeout);
+async function replaceFocusedTextByKeyboard(page, text, { delay = 8 } = {}) {
+  const value = String(text ?? "");
+  const lines = value.split("\n");
 
-  const res = await safeEvaluate(
-    page,
-    (sel, val) => {
-      const host = document.querySelector(sel);
-      if (!host) return { ok: false, reason: "NO_HOST" };
-
-      const root = host.shadowRoot;
-      if (!root) return { ok: false, reason: "NO_SHADOW" };
-
-      const input =
-        root.querySelector("input") ||
-        root.querySelector("textarea") ||
-        root.querySelector('[contenteditable="true"]');
-
-      if (!input) return { ok: false, reason: "NO_INNER_INPUT" };
-
-      if (input.getAttribute?.("contenteditable") === "true") {
-        input.focus();
-        input.textContent = String(val ?? "");
-        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: true };
-      }
-
-      if ("value" in input) {
-        input.focus();
-        input.value = String(val ?? "");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: true };
-      }
-
-      return { ok: false, reason: "UNKNOWN" };
-    },
-    hostSel,
-    String(value ?? ""),
-  );
-
-  if (res?.ok) return true;
-
-  await page.click(hostSel);
-  await sleep(150);
   await page.keyboard.down("Control");
   await page.keyboard.press("KeyA");
   await page.keyboard.up("Control");
-  await page.keyboard.type(String(value ?? ""), { delay: 10 });
+  await page.keyboard.press("Backspace");
+  await sleep(80);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await page.keyboard.type(lines[i], { delay });
+    if (i < lines.length - 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await page.keyboard.press("Enter");
+    }
+  }
+
   return true;
-}
-
-/** ****************************************************************************
- * 로그인 버튼 클릭
- ******************************************************************************/
-async function clickLoginButton(page, timeout = 20000) {
-  const targets = ["로그인", "Log in", "Log In", "Sign in", "Sign In"];
-
-  return withRetry(
-    async () => {
-      const ok = await safeEvaluate(page, (texts) => {
-        const spans = Array.from(document.querySelectorAll("span"));
-        const hit = spans.find((s) => texts.includes((s.textContent || "").trim()));
-        if (!hit) return false;
-        const btn = hit.closest("button");
-        if (!btn) return false;
-        btn.scrollIntoView({ block: "center", inline: "center" });
-        btn.click();
-        return true;
-      }, targets);
-
-      if (!ok) throw new Error("login button not found yet");
-      return true;
-    },
-    { tries: Math.max(1, Math.ceil(timeout / 500)), delayMs: 250, tag: "reddit.clickLogin" },
-  );
 }
 
 /** ****************************************************************************
@@ -195,10 +137,7 @@ async function setTitleFaceplateTextarea(page, title, timeout = 30000) {
 
   await page.click(hostSel);
   await sleep(150);
-  await page.keyboard.down("Control");
-  await page.keyboard.press("KeyA");
-  await page.keyboard.up("Control");
-  await page.keyboard.type(String(title ?? ""), { delay: 8 });
+  await replaceFocusedTextByKeyboard(page, title, { delay: 8 });
   return true;
 }
 
@@ -214,24 +153,7 @@ async function setBodyLexicalRTE(page, body, timeout = 30000) {
   await page.click(editorSel);
   await sleep(150);
 
-  await page.keyboard.down("Control");
-  await page.keyboard.press("KeyA");
-  await page.keyboard.up("Control");
-  await page.keyboard.press("Backspace");
-  await sleep(80);
-
-  const text = String(body ?? "");
-  const lines = text.split("\n");
-
-  for (let i = 0; i < lines.length; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    await page.keyboard.type(lines[i], { delay: 6 });
-    if (i < lines.length - 1) {
-      // eslint-disable-next-line no-await-in-loop
-      await page.keyboard.press("Enter");
-    }
-  }
-
+  await replaceFocusedTextByKeyboard(page, body, { delay: 6 });
   return true;
 }
 
@@ -261,7 +183,8 @@ async function clickSubmitPostButton(page, timeout = 30000) {
       btn.click();
 
       return { ok: true, reason: "CLICKED" };
-    });
+    },
+    { tag: "reddit.clickSubmitPostButton" });
 
     if (res?.ok) {
       console.log("[reddit][post] submit clicked");
@@ -344,7 +267,8 @@ async function clickCommentsActionButton(page, timeout = 15000) {
         title: document.title,
         text: (btn.textContent || "").trim(),
       };
-    });
+    },
+    { tag: "reddit.clickCommentsActionButton" });
 
     console.log("[reddit][comment] clickCommentsActionButton result:", res);
 
@@ -382,7 +306,8 @@ async function scrollToCommentsArea(page, { rounds = 8, step = 900 } = {}) {
       }
 
       return false;
-    });
+    },
+    { tag: "reddit.scrollToCommentsArea.find" });
 
     // eslint-disable-next-line no-await-in-loop
     await sleep(350);
@@ -396,7 +321,10 @@ async function scrollToCommentsArea(page, { rounds = 8, step = 900 } = {}) {
     }
 
     // eslint-disable-next-line no-await-in-loop
-    await safeEvaluate(page, (dy) => window.scrollBy(0, dy), step);
+    await safeEvaluate(page, (dy) => window.scrollBy(0, dy), step,
+      { tag: "reddit.scrollToCommentsArea.scroll" }
+    );
+
     // eslint-disable-next-line no-await-in-loop
     await sleep(350);
   }
@@ -525,7 +453,8 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
       }
 
       return { ok: false, reason: "NO_EDITOR", url: location.href, title: document.title };
-    });
+    },
+    { tag: "reddit.focusCommentEditorDeepStrict" });
 
     if (res?.ok) {
       console.log("[reddit][comment] editor focused:", res);
@@ -545,25 +474,7 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
  * 댓글 텍스트 입력
  ******************************************************************************/
 async function setCommentTextByKeyboard(page, text) {
-  const v = String(text ?? "");
-
-  await page.keyboard.down("Control");
-  await page.keyboard.press("KeyA");
-  await page.keyboard.up("Control");
-  await page.keyboard.press("Backspace");
-  await sleep(80);
-
-  const lines = v.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    await page.keyboard.type(lines[i], { delay: 8 });
-    if (i < lines.length - 1) {
-      // eslint-disable-next-line no-await-in-loop
-      await page.keyboard.press("Enter");
-    }
-  }
-
-  return true;
+  return replaceFocusedTextByKeyboard(page, text, { delay: 8 });
 }
 
 /** ****************************************************************************
@@ -614,7 +525,8 @@ async function clickCommentSubmitButtonDeep(page, timeout = 20000) {
       }
 
       return { ok: false, reason: "NO_SUBMIT" };
-    });
+    },
+    { tag: "reddit.clickCommentSubmitButtonDeep" });
 
     if (res?.ok) {
       console.log("[reddit][comment] submit clicked:", res);
@@ -631,9 +543,6 @@ async function clickCommentSubmitButtonDeep(page, timeout = 20000) {
 module.exports = {
   buildSearchUrl,
   buildTextSubmitUrlFromPickValue,
-
-  setFaceplateTextInputById,
-  clickLoginButton,
 
   setTitleFaceplateTextarea,
   setBodyLexicalRTE,

@@ -9,7 +9,7 @@
  *  - Reddit 자동화 시나리오를 실제로 실행하는 runner
  *  - 직접 `node runReddit.js`로 실행 가능
  *  - Electron main.js에서도 child process로 실행 가능
- *
+ * 
  * 변경 포인트:
  *  1) history 경로에서 process.cwd() 제거
  *  2) BOT_USERNAME / BOT_PASSWORD 우선 사용
@@ -25,7 +25,8 @@ const path = require("path");
 
 const {
   enterSite,
-  loginRedditAuto,
+  waitForRedditLogin,
+  ensureRedditLoggedIn,
   commentOnSearchResults,
 } = require("./redditBot");
 
@@ -113,12 +114,13 @@ function appendHistory(entry) {
  *    이 값을 우선 사용한다.
  *  - 직접 단독 실행도 고려해 REDDIT_USERNAME / REDDIT_PASSWORD fallback 유지
  ******************************************************************************/
-const REDDIT_USERNAME =
-  readEnvString("BOT_USERNAME") || readEnvString("REDDIT_USERNAME") || "";
-
-const REDDIT_PASSWORD =
-  readEnvString("BOT_PASSWORD") || readEnvString("REDDIT_PASSWORD") || "";
-
+/** ****************************************************************************
+ * env 설정
+ *
+ * 중요:
+ *  - 로그인은 수동으로 처리한다.
+ *  - runner는 브라우저를 연 뒤 로그인 완료를 기다린다.
+ ******************************************************************************/
 const REDDIT_TARGET_SUBREDDIT = readEnvString("REDDIT_TARGET_SUBREDDIT", "").trim();
 const REDDIT_TARGET_KEYWORD = readEnvString("REDDIT_TARGET_KEYWORD", "").trim();
 const REDDIT_TARGET_DATE_RANGE = readEnvString("REDDIT_TARGET_DATE_RANGE", "").trim();
@@ -127,28 +129,34 @@ const REDDIT_TARGET_COMMENT_TEXT = readEnvString("REDDIT_TARGET_COMMENT_TEXT", "
 
 const HEADLESS = readEnvBool("BOT_HEADLESS", false);
 
+/** 로그인 완료 대기 최대 시간 */
+const LOGIN_WAIT_TIMEOUT_MS = readEnvNumber("BOT_LOGIN_WAIT_TIMEOUT_MS", 10 * 60 * 1000);
+
+/** 대기 상태에서 루프 간격 */
+const STANDBY_POLL_MS = readEnvNumber("BOT_STANDBY_POLL_MS", 2000);
+
 /** ****************************************************************************
  * 댓글 작업 가능 여부
  ******************************************************************************/
 function hasCommentJobConfig() {
   return Boolean(
     REDDIT_TARGET_SUBREDDIT &&
-      REDDIT_TARGET_KEYWORD &&
-      REDDIT_TARGET_COMMENT_TEXT &&
-      REDDIT_TARGET_COMMENT_COUNT > 0
+    REDDIT_TARGET_KEYWORD &&
+    REDDIT_TARGET_COMMENT_TEXT &&
+    REDDIT_TARGET_COMMENT_COUNT > 0
   );
 }
 
 /** ****************************************************************************
  * 실행 config 로그용 객체
- *
- * 비밀번호는 절대 로그에 남기지 않는다.
  ******************************************************************************/
 function getRunSummary() {
   return {
     userDataRoot: USER_DATA_ROOT,
     headless: HEADLESS,
-    hasLogin: Boolean(REDDIT_USERNAME && REDDIT_PASSWORD),
+    manualLogin: true,
+    loginWaitTimeoutMs: LOGIN_WAIT_TIMEOUT_MS,
+    standbyPollMs: STANDBY_POLL_MS,
     commentJob: hasCommentJobConfig(),
     subreddit: REDDIT_TARGET_SUBREDDIT,
     keyword: REDDIT_TARGET_KEYWORD,
@@ -158,13 +166,51 @@ function getRunSummary() {
 }
 
 /** ****************************************************************************
+ * runner 상태
+ ******************************************************************************/
+let isStopping = false;
+let signalsBound = false;
+
+/** ****************************************************************************
+ * 종료 시그널 바인딩
+ ******************************************************************************/
+function bindShutdownSignals() {
+  if (signalsBound) return;
+  signalsBound = true;
+
+  const onStop = (signal) => {
+    console.log(`[runReddit] stop signal received: ${signal}`);
+    isStopping = true;
+  };
+
+  process.on("SIGINT", onStop);
+  process.on("SIGTERM", onStop);
+}
+
+/** ****************************************************************************
+ * 대기 상태 유지
+ ******************************************************************************/
+async function waitForStandby(tag = "standby") {
+  console.log(`[runReddit] entering ${tag}`);
+
+  while (!isStopping) {
+    await sleep(STANDBY_POLL_MS);
+  }
+
+  console.log(`[runReddit] leaving ${tag}`);
+}
+
+/** ****************************************************************************
  * Reddit runner
  ******************************************************************************/
 async function runReddit() {
   console.log("[runReddit] runner started");
   console.log("[runReddit] config:", getRunSummary());
 
+  bindShutdownSignals();
+
   let page = null;
+  let runResult = null;
 
   try {
     /** ------------------------------------------------------------------------
@@ -186,23 +232,29 @@ async function runReddit() {
     console.log("[runReddit] entered site");
 
     /** ------------------------------------------------------------------------
-     * 2) 로그인
+     * 2) 사용자 수동 로그인 대기
      * ---------------------------------------------------------------------- */
-    if (REDDIT_USERNAME && REDDIT_PASSWORD) {
-      console.log("[runReddit] login starting");
-      await loginRedditAuto(page, {
-        username: REDDIT_USERNAME,
-        password: REDDIT_PASSWORD,
-      });
-      console.log("[runReddit] login completed");
-    } else {
-      console.log(
-        "[runReddit] login skipped: set BOT_USERNAME/BOT_PASSWORD or REDDIT_USERNAME/REDDIT_PASSWORD"
-      );
-    }
+    console.log("[runReddit] waiting for manual login");
+    page = await waitForRedditLogin(page, {
+      timeout: LOGIN_WAIT_TIMEOUT_MS,
+    });
+    console.log("[runReddit] login detected");
+
+    appendHistory({
+      action: "manualLoginWait",
+      status: "success",
+      config: {
+        timeoutMs: LOGIN_WAIT_TIMEOUT_MS,
+      },
+    });
 
     /** ------------------------------------------------------------------------
-     * 3) 댓글 자동 게시 작업
+     * 3) 작업 전 로그인 보장
+     * ---------------------------------------------------------------------- */
+    page = await ensureRedditLoggedIn(page);
+
+    /** ------------------------------------------------------------------------
+     * 4) 댓글 자동 게시 작업
      * ---------------------------------------------------------------------- */
     if (hasCommentJobConfig()) {
       console.log("[runReddit] comment job starting", {
@@ -219,6 +271,8 @@ async function runReddit() {
         count: REDDIT_TARGET_COMMENT_COUNT,
         commentText: REDDIT_TARGET_COMMENT_TEXT,
       });
+
+      page = result?.page || page;
 
       appendHistory({
         action: "commentOnSearchResults",
@@ -237,32 +291,42 @@ async function runReddit() {
       });
 
       console.log("[runReddit] comment job completed");
-      await sleep(2000);
-      return { ok: true, action: "comment", result };
+
+      runResult = {
+        ok: true,
+        action: "comment",
+        result,
+      };
+    } else {
+      console.log("[runReddit] no comment job config, standby after login");
+
+      appendHistory({
+        action: "idleStandby",
+        status: "success",
+        config: {
+          manualLogin: true,
+        },
+      });
+
+      runResult = {
+        ok: true,
+        action: "idleStandby",
+      };
     }
 
     /** ------------------------------------------------------------------------
-     * 4) 작업 설정이 없으면 브라우저만 잠시 유지
+     * 5) 작업 종료 후 브라우저 유지 대기
      * ---------------------------------------------------------------------- */
-    console.log("[runReddit] no comment job config, keeping browser open briefly");
-    await sleep(10000);
+    await waitForStandby("post-run-standby");
 
-    appendHistory({
-      action: "idleOpen",
-      status: "success",
-      config: {
-        hasLogin: Boolean(REDDIT_USERNAME && REDDIT_PASSWORD),
-      },
-    });
-
-    return { ok: true, action: "idleOpen" };
+    return runResult;
   } catch (err) {
     const message = String(err?.message || err || "Unknown error");
 
     console.error("[runReddit] failed:", message);
 
     appendHistory({
-      action: hasCommentJobConfig() ? "commentOnSearchResults" : "idleOpen",
+      action: hasCommentJobConfig() ? "commentOnSearchResults" : "idleStandby",
       status: "error",
       error: message,
       config: {
@@ -276,7 +340,7 @@ async function runReddit() {
     throw err;
   } finally {
     /** ------------------------------------------------------------------------
-     * 5) 모든 브라우저 정리
+     * 6) 종료 신호가 왔거나 예외로 빠질 때만 브라우저 정리
      * ---------------------------------------------------------------------- */
     await closeAll().catch((closeErr) => {
       console.error("[runReddit] closeAll failed:", closeErr?.message || closeErr);
