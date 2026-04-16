@@ -1,57 +1,46 @@
-/**
- * platforms/reddit/runReddit.js
- *
- * =============================================================================
- * REDDIT RUNNER
- * =============================================================================
- *
- * 역할:
- *  - Reddit 자동화 시나리오를 실제로 실행하는 runner
- *  - 직접 `node runReddit.js`로 실행 가능
- *  - Electron main.js에서도 child process로 실행 가능
- * 
- * 변경 포인트:
- *  1) history 경로에서 process.cwd() 제거
- *  2) 안전한 env 파싱 추가
- *  3) success / error history 구조 정리
- * =============================================================================
- */
+"use strict";
 
 /* eslint-disable no-console */
+
+/** ****************************************************************************
+ * platforms/thread/runThread.js
+ *
+ * 역할:
+ *  - Threads runner
+ *  - 브라우저 생성
+ *  - 사용자 수동 로그인 대기
+ *  - 검색/댓글 작업 수행
+ *  - 작업 완료 후 standby 유지
+ ******************************************************************************/
+
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
 const {
   enterSite,
-  waitForRedditLogin,
-  ensureRedditLoggedIn,
+  bindThreadPageDebug,
+  waitForManualThreadLogin,
   commentOnSearchResults,
-} = require("./redditBot");
+} = require("./threadBot");
 
 const { closeAll } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
 
 /** ****************************************************************************
- * 안전한 문자열 env 읽기
+ * 안전한 env 읽기
  ******************************************************************************/
 function readEnvString(name, fallback = "") {
   const value = process.env[name];
   return typeof value === "string" ? value : fallback;
 }
 
-/** ****************************************************************************
- * 안전한 숫자 env 읽기
- ******************************************************************************/
 function readEnvNumber(name, fallback = 0) {
   const raw = process.env[name];
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/** ****************************************************************************
- * 안전한 boolean env 읽기
- ******************************************************************************/
 function readEnvBool(name, fallback = false) {
   const raw = readEnvString(name, "");
   if (raw === "1" || raw.toLowerCase() === "true") return true;
@@ -61,16 +50,11 @@ function readEnvBool(name, fallback = false) {
 
 /** ****************************************************************************
  * writable user data root
- *
- * 우선순위:
- *  1) Electron main이 child env로 넘긴 BOT_USER_DATA
- *  2) 직접 node 실행 시 사용자 홈 디렉터리 기반 fallback
  ******************************************************************************/
 function getWritableUserDataRoot() {
   const fromEnv = readEnvString("BOT_USER_DATA", "").trim();
   if (fromEnv) return fromEnv;
 
-  /** 직접 실행 fallback - process.cwd()는 사용하지 않는다 */
   return path.join(os.homedir(), ".automation-bot");
 }
 
@@ -95,73 +79,58 @@ function appendHistory(entry) {
 
     const line = JSON.stringify({
       createdAt: new Date().toISOString(),
-      target: "reddit",
+      target: "thread",
       ...entry,
     });
 
     fs.appendFileSync(HISTORY_FILE, line + "\n", "utf8");
   } catch (err) {
-    console.error("[runReddit] appendHistory failed:", err?.message || err);
+    console.error("[runThread] appendHistory failed:", err?.message || err);
   }
 }
 
 /** ****************************************************************************
  * env 설정
- *
- * 중요:
- *  - main.js가 account 정보를 BOT_USERNAME / BOT_PASSWORD로 넘기므로
- *    이 값을 우선 사용한다.
- *  - 직접 단독 실행도 고려해 REDDIT_USERNAME / REDDIT_PASSWORD fallback 유지
  ******************************************************************************/
-/** ****************************************************************************
- * env 설정
- *
- * 중요:
- *  - 로그인은 수동으로 처리한다.
- *  - runner는 브라우저를 연 뒤 로그인 완료를 기다린다.
- ******************************************************************************/
-const REDDIT_TARGET_SUBREDDIT = readEnvString("REDDIT_TARGET_SUBREDDIT", "").trim();
-const REDDIT_TARGET_KEYWORD = readEnvString("REDDIT_TARGET_KEYWORD", "").trim();
-const REDDIT_TARGET_DATE_RANGE = readEnvString("REDDIT_TARGET_DATE_RANGE", "").trim();
-const REDDIT_TARGET_COMMENT_COUNT = readEnvNumber("REDDIT_TARGET_COMMENT_COUNT", 0);
-const REDDIT_TARGET_COMMENT_TEXT = readEnvString("REDDIT_TARGET_COMMENT_TEXT", "").trim();
+const THREAD_TARGET_KEYWORD = readEnvString("THREAD_TARGET_KEYWORD", "").trim();
+const THREAD_TARGET_DATE_RANGE = readEnvString("THREAD_TARGET_DATE_RANGE", "").trim();
+const THREAD_TARGET_COMMENT_COUNT = readEnvNumber("THREAD_TARGET_COMMENT_COUNT", 0);
+const THREAD_TARGET_COMMENT_TEXT = readEnvString("THREAD_TARGET_COMMENT_TEXT", "").trim();
+const THREAD_SEARCH_OPTION = readEnvString("THREAD_SEARCH_OPTION", "default").trim() || "default";
+const THREAD_EXPLORE_MINUTES = readEnvNumber("THREAD_EXPLORE_MINUTES", 10);
 
 const HEADLESS = readEnvBool("BOT_HEADLESS", false);
-
-/** 로그인 완료 대기 최대 시간 */
 const LOGIN_WAIT_TIMEOUT_MS = readEnvNumber("BOT_LOGIN_WAIT_TIMEOUT_MS", 10 * 60 * 1000);
-
-/** 대기 상태에서 루프 간격 */
 const STANDBY_POLL_MS = readEnvNumber("BOT_STANDBY_POLL_MS", 2000);
 
 /** ****************************************************************************
- * 댓글 작업 가능 여부
+ * 작업 여부
  ******************************************************************************/
 function hasCommentJobConfig() {
   return Boolean(
-    REDDIT_TARGET_SUBREDDIT &&
-    REDDIT_TARGET_KEYWORD &&
-    REDDIT_TARGET_COMMENT_TEXT &&
-    REDDIT_TARGET_COMMENT_COUNT > 0
+    THREAD_TARGET_KEYWORD &&
+    THREAD_TARGET_COMMENT_TEXT &&
+    THREAD_TARGET_COMMENT_COUNT > 0
   );
 }
 
 /** ****************************************************************************
- * 실행 config 로그용 객체
+ * 로그용 실행 요약
  ******************************************************************************/
-function getRunSummary() {
-  return {
-    userDataRoot: USER_DATA_ROOT,
-    headless: HEADLESS,
-    manualLogin: true,
-    loginWaitTimeoutMs: LOGIN_WAIT_TIMEOUT_MS,
-    standbyPollMs: STANDBY_POLL_MS,
-    commentJob: hasCommentJobConfig(),
-    subreddit: REDDIT_TARGET_SUBREDDIT,
-    keyword: REDDIT_TARGET_KEYWORD,
-    dateRange: REDDIT_TARGET_DATE_RANGE,
-    count: REDDIT_TARGET_COMMENT_COUNT,
-  };
+function getRunSummaryLine() {
+  return [
+    `userDataRoot=${USER_DATA_ROOT}`,
+    `headless=${HEADLESS}`,
+    `manualLogin=true`,
+    `loginWaitTimeoutMs=${LOGIN_WAIT_TIMEOUT_MS}`,
+    `standbyPollMs=${STANDBY_POLL_MS}`,
+    `commentJob=${hasCommentJobConfig()}`,
+    `keyword=${THREAD_TARGET_KEYWORD || "(없음)"}`,
+    `dateRange=${THREAD_TARGET_DATE_RANGE || "(없음)"}`,
+    `count=${THREAD_TARGET_COMMENT_COUNT}`,
+    `searchOption=${THREAD_SEARCH_OPTION || "(없음)"}`,
+    `exploreMinutes=${THREAD_EXPLORE_MINUTES}`,
+  ].join(" ");
 }
 
 /** ****************************************************************************
@@ -178,7 +147,7 @@ function bindShutdownSignals() {
   signalsBound = true;
 
   const onStop = (signal) => {
-    console.log(`[runReddit] stop signal received: ${signal}`);
+    console.log(`[runThread] stop signal received: ${signal}`);
     isStopping = true;
   };
 
@@ -187,24 +156,24 @@ function bindShutdownSignals() {
 }
 
 /** ****************************************************************************
- * 대기 상태 유지
+ * standby 유지
  ******************************************************************************/
 async function waitForStandby(tag = "standby") {
-  console.log(`[runReddit] entering ${tag}`);
+  console.log(`[runThread] entering ${tag}`);
 
   while (!isStopping) {
     await sleep(STANDBY_POLL_MS);
   }
 
-  console.log(`[runReddit] leaving ${tag}`);
+  console.log(`[runThread] leaving ${tag}`);
 }
 
 /** ****************************************************************************
- * Reddit runner
+ * Threads runner
  ******************************************************************************/
-async function runReddit() {
-  console.log("[runReddit] runner started");
-  console.log("[runReddit] config:", getRunSummary());
+async function runThread() {
+  console.log("[runThread] runner started");
+  console.log(`[runThread] config ${getRunSummaryLine()}`);
 
   bindShutdownSignals();
 
@@ -214,10 +183,10 @@ async function runReddit() {
   try {
     /** ------------------------------------------------------------------------
      * 1) 사이트 진입
-     * ---------------------------------------------------------------------- */
+     * --------------------------------------------------------------------- */
     const opened = await enterSite({
       headless: HEADLESS,
-      storageKey: "reddit_main",
+      storageKey: "thread_main",
       localeProfileKey: "kr",
       useTempProfile: false,
     });
@@ -225,19 +194,18 @@ async function runReddit() {
     page = opened?.page;
 
     if (!page) {
-      throw new Error("Reddit page was not created");
+      throw new Error("Thread page was not created");
     }
 
-    console.log("[runReddit] entered site");
+    bindThreadPageDebug(page);
+    console.log("[runThread] entered site");
 
     /** ------------------------------------------------------------------------
      * 2) 사용자 수동 로그인 대기
-     * ---------------------------------------------------------------------- */
-    console.log("[runReddit] waiting for manual login");
-    page = await waitForRedditLogin(page, {
-      timeout: LOGIN_WAIT_TIMEOUT_MS,
+     * --------------------------------------------------------------------- */
+    page = await waitForManualThreadLogin(page, {
+      timeoutMs: LOGIN_WAIT_TIMEOUT_MS,
     });
-    console.log("[runReddit] login detected");
 
     appendHistory({
       action: "manualLoginWait",
@@ -248,27 +216,16 @@ async function runReddit() {
     });
 
     /** ------------------------------------------------------------------------
-     * 3) 작업 전 로그인 보장
-     * ---------------------------------------------------------------------- */
-    page = await ensureRedditLoggedIn(page);
-
-    /** ------------------------------------------------------------------------
-     * 4) 댓글 자동 게시 작업
-     * ---------------------------------------------------------------------- */
+     * 3) 댓글 작업
+     * --------------------------------------------------------------------- */
     if (hasCommentJobConfig()) {
-      console.log("[runReddit] comment job starting", {
-        subreddit: REDDIT_TARGET_SUBREDDIT,
-        keyword: REDDIT_TARGET_KEYWORD,
-        dateRange: REDDIT_TARGET_DATE_RANGE,
-        count: REDDIT_TARGET_COMMENT_COUNT,
-      });
-
       const result = await commentOnSearchResults(page, {
-        subreddit: REDDIT_TARGET_SUBREDDIT,
-        keyword: REDDIT_TARGET_KEYWORD,
-        dateRange: REDDIT_TARGET_DATE_RANGE,
-        count: REDDIT_TARGET_COMMENT_COUNT,
-        commentText: REDDIT_TARGET_COMMENT_TEXT,
+        keyword: THREAD_TARGET_KEYWORD,
+        dateRange: THREAD_TARGET_DATE_RANGE,
+        count: THREAD_TARGET_COMMENT_COUNT,
+        commentText: THREAD_TARGET_COMMENT_TEXT,
+        searchOption: THREAD_SEARCH_OPTION,
+        exploreMinutes: THREAD_EXPLORE_MINUTES,
       });
 
       page = result?.page || page;
@@ -277,11 +234,12 @@ async function runReddit() {
         action: "commentOnSearchResults",
         status: "success",
         config: {
-          subreddit: REDDIT_TARGET_SUBREDDIT,
-          keyword: REDDIT_TARGET_KEYWORD,
-          dateRange: REDDIT_TARGET_DATE_RANGE,
-          count: REDDIT_TARGET_COMMENT_COUNT,
-          commentText: REDDIT_TARGET_COMMENT_TEXT,
+          keyword: THREAD_TARGET_KEYWORD,
+          dateRange: THREAD_TARGET_DATE_RANGE,
+          count: THREAD_TARGET_COMMENT_COUNT,
+          commentText: THREAD_TARGET_COMMENT_TEXT,
+          searchOption: THREAD_SEARCH_OPTION,
+          exploreMinutes: THREAD_EXPLORE_MINUTES,
         },
         result: {
           urls: Array.isArray(result?.urls) ? result.urls : [],
@@ -289,15 +247,13 @@ async function runReddit() {
         },
       });
 
-      console.log("[runReddit] comment job completed");
-
       runResult = {
         ok: true,
         action: "comment",
         result,
       };
     } else {
-      console.log("[runReddit] no comment job config, standby after login");
+      console.log("[runThread] no comment job config, standby after login");
 
       appendHistory({
         action: "idleStandby",
@@ -314,35 +270,33 @@ async function runReddit() {
     }
 
     /** ------------------------------------------------------------------------
-     * 5) 작업 종료 후 브라우저 유지 대기
-     * ---------------------------------------------------------------------- */
+     * 4) 작업 완료 후 대기
+     * --------------------------------------------------------------------- */
     await waitForStandby("post-run-standby");
 
     return runResult;
   } catch (err) {
     const message = String(err?.message || err || "Unknown error");
 
-    console.error("[runReddit] failed:", message);
+    console.error("[runThread] failed:", message);
 
     appendHistory({
       action: hasCommentJobConfig() ? "commentOnSearchResults" : "idleStandby",
       status: "error",
       error: message,
       config: {
-        subreddit: REDDIT_TARGET_SUBREDDIT,
-        keyword: REDDIT_TARGET_KEYWORD,
-        dateRange: REDDIT_TARGET_DATE_RANGE,
-        count: REDDIT_TARGET_COMMENT_COUNT,
+        keyword: THREAD_TARGET_KEYWORD,
+        dateRange: THREAD_TARGET_DATE_RANGE,
+        count: THREAD_TARGET_COMMENT_COUNT,
+        searchOption: THREAD_SEARCH_OPTION,
+        exploreMinutes: THREAD_EXPLORE_MINUTES,
       },
     });
 
     throw err;
   } finally {
-    /** ------------------------------------------------------------------------
-     * 6) 종료 신호가 왔거나 예외로 빠질 때만 브라우저 정리
-     * ---------------------------------------------------------------------- */
     await closeAll().catch((closeErr) => {
-      console.error("[runReddit] closeAll failed:", closeErr?.message || closeErr);
+      console.error("[runThread] closeAll failed:", closeErr?.message || closeErr);
     });
   }
 }
@@ -351,10 +305,10 @@ async function runReddit() {
  * 직접 실행
  ******************************************************************************/
 if (require.main === module) {
-  runReddit().catch((err) => {
+  runThread().catch((err) => {
     console.error(err);
     process.exitCode = 1;
   });
 }
 
-module.exports = runReddit;
+module.exports = runThread;

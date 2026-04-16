@@ -18,12 +18,22 @@ const state = {
   /** bot 실행 설정 */
   config: {
     target: "reddit",
+
     reddit: {
       dateRange: "",
       subreddit: "",
       keyword: "",
       commentCount: 1,
       commentText: "",
+    },
+
+    thread: {
+      dateRange: "",
+      keyword: "",
+      commentCount: 1,
+      commentText: "",
+      searchOption: "default",   // default | recent
+      exploreMinutes: 10,
     },
   },
 };
@@ -44,6 +54,45 @@ const historyListEl = document.getElementById("history-list");
 const historyBackBtnEl = document.getElementById("history-back-btn");
 
 /** ****************************************************************************
+ * 공통 helpers
+ ******************************************************************************/
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function toSafeNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function isPositiveNumber(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+function getThreadSearchOptionLabel(value) {
+  if (value === "recent") return "최근 검색";
+  return "인기 검색";
+}
+
+function pushUiLog(key, level, message) {
+  state.logs.push({
+    key,
+    level,
+    message,
+    ts: new Date().toISOString(),
+  });
+
+  if (state.logs.length > 3000) {
+    state.logs = state.logs.slice(-2000);
+  }
+
+  renderLogs();
+}
+
+/** ****************************************************************************
  * browser 옵션 토글 렌더링
  ******************************************************************************/
 function renderHeadlessToggle() {
@@ -54,13 +103,21 @@ function renderHeadlessToggle() {
     </label>
   `;
 
-  document.getElementById("headless-toggle").addEventListener("change", (e) => {
-    state.launchOptions.headless = e.target.checked;
+  const toggle = document.getElementById("headless-toggle");
+  if (!toggle) return;
+
+  toggle.addEventListener("change", (event) => {
+    state.launchOptions.headless = event.target.checked;
   });
 }
 
 /** ****************************************************************************
- * bot 실행 설정
+ * bot 실행 설정 렌더링
+ *
+ * 구성:
+ *  - target 선택
+ *  - reddit 설정 블록
+ *  - thread 설정 블록
  ******************************************************************************/
 function renderBotConfig() {
   botConfigEl.innerHTML = `
@@ -70,34 +127,46 @@ function renderBotConfig() {
         <option value="reddit" ${state.config.target === "reddit" ? "selected" : ""}>Reddit</option>
         <option value="instagram" ${state.config.target === "instagram" ? "selected" : ""}>Instagram</option>
         <option value="dc" ${state.config.target === "dc" ? "selected" : ""}>DCInside</option>
+        <option value="thread" ${state.config.target === "thread" ? "selected" : ""}>Thread</option>
       </select>
     </div>
 
     <div id="reddit-config" class="${state.config.target !== "reddit" ? "hidden" : ""}">
       <div class="bot-config-row">
         <label for="reddit-date-range">날짜 범위 (YYYY-MM-DD~YYYY-MM-DD)</label>
-        <input id="reddit-date-range" placeholder="2026-03-01~2026-03-10" value="${escapeHtml(
-          state.config.reddit.dateRange,
-        )}" />
+        <input
+          id="reddit-date-range"
+          placeholder="2026-03-01~2026-03-10"
+          value="${escapeHtml(state.config.reddit.dateRange)}"
+        />
       </div>
 
       <div class="bot-config-row">
         <label for="reddit-subreddit">커뮤니티 (subreddit)</label>
-        <input id="reddit-subreddit" placeholder="javascript" value="${escapeHtml(
-          state.config.reddit.subreddit,
-        )}" />
+        <input
+          id="reddit-subreddit"
+          placeholder="javascript"
+          value="${escapeHtml(state.config.reddit.subreddit)}"
+        />
       </div>
 
       <div class="bot-config-row">
         <label for="reddit-keyword">키워드 (제목 포함)</label>
-        <input id="reddit-keyword" placeholder="automation" value="${escapeHtml(
-          state.config.reddit.keyword,
-        )}" />
+        <input
+          id="reddit-keyword"
+          placeholder="automation"
+          value="${escapeHtml(state.config.reddit.keyword)}"
+        />
       </div>
 
       <div class="bot-config-row">
         <label for="reddit-comment-count">댓글 개수</label>
-        <input id="reddit-comment-count" type="number" min="1" value="${state.config.reddit.commentCount}" />
+        <input
+          id="reddit-comment-count"
+          type="number"
+          min="1"
+          value="${state.config.reddit.commentCount}"
+        />
       </div>
 
       <div class="bot-config-row">
@@ -107,12 +176,75 @@ function renderBotConfig() {
         )}</textarea>
       </div>
     </div>
+
+    <div id="thread-config" class="${state.config.target !== "thread" ? "hidden" : ""}">
+      <div class="bot-config-row">
+        <label for="thread-date-range">날짜 범위 (YYYY-MM-DD~YYYY-MM-DD)</label>
+        <input
+          id="thread-date-range"
+          placeholder="2026-03-01~2026-03-10"
+          value="${escapeHtml(state.config.thread.dateRange)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="thread-keyword">키워드</label>
+        <input
+          id="thread-keyword"
+          placeholder="ai automation"
+          value="${escapeHtml(state.config.thread.keyword)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="thread-search-option">검색 옵션</label>
+        <select id="thread-search-option" class="select">
+          <option value="default" ${state.config.thread.searchOption === "default" ? "selected" : ""}>인기 검색</option>
+          <option value="recent" ${state.config.thread.searchOption === "recent" ? "selected" : ""}>최근 검색</option>
+        </select>
+      </div>
+
+      <div class="bot-config-row">
+        <label for="thread-comment-count">댓글 개수</label>
+        <input
+          id="thread-comment-count"
+          type="number"
+          min="1"
+          value="${state.config.thread.commentCount}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="thread-explore-minutes">탐색 시간 (분)</label>
+        <input
+          id="thread-explore-minutes"
+          type="number"
+          min="1"
+          value="${state.config.thread.exploreMinutes}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="thread-comment-text">댓글 내용</label>
+        <textarea id="thread-comment-text" placeholder="댓글 텍스트...">${escapeHtml(
+          state.config.thread.commentText,
+        )}</textarea>
+      </div>
+    </div>
   `;
 }
 
+/** ****************************************************************************
+ * 설정 UI 동기화
+ *
+ * 역할:
+ *  - target 변경 시 섹션 show/hide
+ *  - state 값을 각 입력창에 다시 반영
+ ******************************************************************************/
 function updateBotConfigUI() {
   const targetSelect = document.getElementById("target-select");
   const redditConfig = document.getElementById("reddit-config");
+  const threadConfig = document.getElementById("thread-config");
 
   if (targetSelect) {
     targetSelect.value = state.config.target;
@@ -133,11 +265,35 @@ function updateBotConfigUI() {
     if (commentCount) commentCount.value = state.config.reddit.commentCount;
     if (commentText) commentText.value = state.config.reddit.commentText;
   }
+
+  if (threadConfig) {
+    threadConfig.classList.toggle("hidden", state.config.target !== "thread");
+
+    const dateRange = document.getElementById("thread-date-range");
+    const keyword = document.getElementById("thread-keyword");
+    const searchOption = document.getElementById("thread-search-option");
+    const commentCount = document.getElementById("thread-comment-count");
+    const exploreMinutes = document.getElementById("thread-explore-minutes");
+    const commentText = document.getElementById("thread-comment-text");
+
+    if (dateRange) dateRange.value = state.config.thread.dateRange;
+    if (keyword) keyword.value = state.config.thread.keyword;
+    if (searchOption) searchOption.value = state.config.thread.searchOption;
+    if (commentCount) commentCount.value = state.config.thread.commentCount;
+    if (exploreMinutes) exploreMinutes.value = state.config.thread.exploreMinutes;
+    if (commentText) commentText.value = state.config.thread.commentText;
+  }
 }
 
+/** ****************************************************************************
+ * bot 설정 입력 처리
+ ******************************************************************************/
 function handleBotConfigInput(event) {
   const { id, value } = event.target;
 
+  /** --------------------------------------------------------------------------
+   * 1) 타겟 선택
+   * ----------------------------------------------------------------------- */
   if (id === "target-select") {
     state.config.target = value;
     renderBots();
@@ -145,6 +301,9 @@ function handleBotConfigInput(event) {
     return;
   }
 
+  /** --------------------------------------------------------------------------
+   * 2) reddit 설정
+   * ----------------------------------------------------------------------- */
   if (id === "reddit-date-range") {
     state.config.reddit.dateRange = value;
     return;
@@ -161,13 +320,45 @@ function handleBotConfigInput(event) {
   }
 
   if (id === "reddit-comment-count") {
-    const num = Number(value);
-    state.config.reddit.commentCount = Number.isNaN(num) ? 0 : num;
+    state.config.reddit.commentCount = toSafeNumber(value, 0);
     return;
   }
 
   if (id === "reddit-comment-text") {
     state.config.reddit.commentText = value;
+    return;
+  }
+
+  /** --------------------------------------------------------------------------
+   * 3) thread 설정
+   * ----------------------------------------------------------------------- */
+  if (id === "thread-date-range") {
+    state.config.thread.dateRange = value;
+    return;
+  }
+
+  if (id === "thread-keyword") {
+    state.config.thread.keyword = value;
+    return;
+  }
+
+  if (id === "thread-search-option") {
+    state.config.thread.searchOption = value;
+    return;
+  }
+
+  if (id === "thread-comment-count") {
+    state.config.thread.commentCount = toSafeNumber(value, 0);
+    return;
+  }
+
+  if (id === "thread-explore-minutes") {
+    state.config.thread.exploreMinutes = toSafeNumber(value, 0);
+    return;
+  }
+
+  if (id === "thread-comment-text") {
+    state.config.thread.commentText = value;
   }
 }
 
@@ -242,16 +433,6 @@ function renderBots() {
 }
 
 /** ****************************************************************************
- * 로그 HTML escape
- ******************************************************************************/
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-/** ****************************************************************************
  * 로그 렌더링
  ******************************************************************************/
 function renderLogs() {
@@ -296,6 +477,70 @@ async function refreshBots() {
 }
 
 /** ****************************************************************************
+ * 시작 전 설정 검증
+ ******************************************************************************/
+function validateBotConfig(key) {
+  /** --------------------------------------------------------------------------
+   * Reddit
+   * ----------------------------------------------------------------------- */
+  if (key === "reddit") {
+    const cfg = state.config.reddit;
+
+    if (!cfg.subreddit || !cfg.keyword || !cfg.commentText || !isPositiveNumber(cfg.commentCount)) {
+      return {
+        ok: false,
+        message:
+          "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 댓글 내용을 모두 입력해 주세요.",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  /** --------------------------------------------------------------------------
+   * Thread
+   * ----------------------------------------------------------------------- */
+  if (key === "thread") {
+    const cfg = state.config.thread;
+
+    if (!cfg.keyword || !cfg.commentText || !isPositiveNumber(cfg.commentCount) || !isPositiveNumber(cfg.exploreMinutes)) {
+      return {
+        ok: false,
+        message:
+          "Thread 설정이 불완전합니다. 키워드, 댓글 개수, 댓글 내용, 탐색 시간을 모두 올바르게 입력해 주세요.",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  return { ok: true };
+}
+
+/** ****************************************************************************
+ * 시작 옵션 생성
+ ******************************************************************************/
+function buildStartOptions(key) {
+  const options = {
+    headless: state.launchOptions.headless,
+  };
+
+  if (key === "reddit") {
+    options.redditConfig = { ...state.config.reddit };
+    return options;
+  }
+
+  if (key === "thread") {
+    options.threadConfig = {
+      ...state.config.thread,
+    };
+    return options;
+  }
+
+  return options;
+}
+
+/** ****************************************************************************
  * 버튼 이벤트 위임
  ******************************************************************************/
 async function handleBotActionClick(event) {
@@ -305,58 +550,35 @@ async function handleBotActionClick(event) {
   const { action, key } = button.dataset;
   if (!action || !key) return;
 
+  /** --------------------------------------------------------------------------
+   * 1) 시작
+   * ----------------------------------------------------------------------- */
   if (action === "start") {
-    if (key === "reddit") {
-      const cfg = state.config.reddit;
+    const validation = validateBotConfig(key);
 
-      if (!cfg.subreddit || !cfg.keyword || !cfg.commentText || cfg.commentCount <= 0) {
-        state.logs.push({
-          key: "reddit",
-          level: "error",
-          message:
-            "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 댓글 내용을 모두 입력해 주세요.",
-          ts: new Date().toISOString(),
-        });
-        renderLogs();
-        return;
-      }
+    if (!validation.ok) {
+      pushUiLog(key, "error", validation.message);
+      return;
     }
 
-    const options = {
-      headless: state.launchOptions.headless,
-    };
-
-    if (key === "reddit") {
-      options.redditConfig = { ...state.config.reddit };
-    }
-
+    const options = buildStartOptions(key);
     const res = await window.botAPI.startBot(key, options);
 
     if (!res?.ok) {
-      state.logs.push({
-        key,
-        level: "error",
-        message: `[renderer] start failed: ${res?.error || "unknown error"}`,
-        ts: new Date().toISOString(),
-      });
-
-      renderLogs();
+      pushUiLog(key, "error", `[renderer] start failed: ${res?.error || "unknown error"}`);
     }
 
     return;
   }
 
+  /** --------------------------------------------------------------------------
+   * 2) 중지
+   * ----------------------------------------------------------------------- */
   if (action === "stop") {
     const res = await window.botAPI.stopBot(key);
 
     if (!res?.ok) {
-      state.logs.push({
-        key,
-        level: "error",
-        message: `[renderer] stop failed: ${res?.error || "unknown error"}`,
-        ts: new Date().toISOString(),
-      });
-      renderLogs();
+      pushUiLog(key, "error", `[renderer] stop failed: ${res?.error || "unknown error"}`);
     }
   }
 }
@@ -383,25 +605,43 @@ function renderHistory(history = []) {
           ? item.urls
           : [];
 
+      /** ----------------------------------------------------------------------
+       * 공통/플랫폼별 조건 메타 표시
+       * ------------------------------------------------------------------- */
       const meta = [];
+
       if (config.subreddit) meta.push(`subreddit: ${escapeHtml(config.subreddit)}`);
       if (config.keyword) meta.push(`keyword: ${escapeHtml(config.keyword)}`);
       if (config.dateRange) meta.push(`dateRange: ${escapeHtml(config.dateRange)}`);
       if (typeof config.count !== "undefined") meta.push(`count: ${escapeHtml(String(config.count))}`);
 
+      if (config.searchOption) {
+        meta.push(`searchOption: ${escapeHtml(getThreadSearchOptionLabel(config.searchOption))}`);
+      }
+
+      if (typeof config.exploreMinutes !== "undefined") {
+        meta.push(`exploreMinutes: ${escapeHtml(String(config.exploreMinutes))}`);
+      }
+
       return `
         <div class="history-card">
           <h3>${escapeHtml(target)} - ${escapeHtml(time)}</h3>
+
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
             <div>댓글 내용: ${escapeHtml(config.commentText || "(없음)")}</div>
           </div>
+
           <div>
             <div style="font-weight:700; margin-bottom:6px;">댓글 단 URL</div>
             <ul class="urls">
-              ${urls.length
-                ? urls.map((u) => `<li><a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a></li>`).join("")
-                : "<li>(없음)</li>"}
+              ${
+                urls.length
+                  ? urls
+                    .map((url) => `<li><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></li>`)
+                    .join("")
+                  : "<li>(없음)</li>"
+              }
             </ul>
           </div>
         </div>
@@ -411,14 +651,22 @@ function renderHistory(history = []) {
 }
 
 function showHistory() {
-  botGridEl.closest(".panel").classList.add("hidden");
+  const panel = botGridEl.closest(".panel");
+  if (panel) {
+    panel.classList.add("hidden");
+  }
+
   historyPanelEl.classList.remove("hidden");
   loadHistory();
 }
 
 function hideHistory() {
   historyPanelEl.classList.add("hidden");
-  botGridEl.closest(".panel").classList.remove("hidden");
+
+  const panel = botGridEl.closest(".panel");
+  if (panel) {
+    panel.classList.remove("hidden");
+  }
 }
 
 /** ****************************************************************************
@@ -435,6 +683,7 @@ async function init() {
   botConfigEl.addEventListener("change", handleBotConfigInput);
 
   botGridEl.addEventListener("click", handleBotActionClick);
+
   historyBtnEl.addEventListener("click", showHistory);
   historyBackBtnEl.addEventListener("click", hideHistory);
 
@@ -469,11 +718,5 @@ async function init() {
 }
 
 init().catch((err) => {
-  state.logs.push({
-    key: "ui",
-    level: "error",
-    message: `[renderer] init failed: ${err?.message || err}`,
-    ts: new Date().toISOString(),
-  });
-  renderLogs();
+  pushUiLog("ui", "error", `[renderer] init failed: ${err?.message || err}`);
 });

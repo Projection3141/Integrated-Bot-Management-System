@@ -139,51 +139,6 @@ function readHistory() {
 }
 
 /** ****************************************************************************
- * 계정 관리
- ******************************************************************************/
-function readAccounts() {
-  try {
-    const accountFile = getAccountFile();
-    if (!fs.existsSync(accountFile)) return [];
-    const raw = fs.readFileSync(accountFile, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function writeAccounts(accounts) {
-  try {
-    const accountFile = getAccountFile();
-    const dir = path.dirname(accountFile);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(accountFile, JSON.stringify(accounts, null, 2), "utf8");
-  } catch (err) {
-    console.error("[MAIN] writeAccounts error:", err);
-  }
-}
-
-function addAccount(name, username, password) {
-  const accounts = readAccounts();
-  if (accounts.some(acc => acc.name === name)) {
-    return { ok: false, error: `Account '${name}' already exists` };
-  }
-  accounts.push({ name, username, password });
-  writeAccounts(accounts);
-  return { ok: true };
-}
-
-function removeAccount(name) {
-  const accounts = readAccounts();
-  const filtered = accounts.filter(acc => acc.name !== name);
-  if (filtered.length === accounts.length) {
-    return { ok: false, error: `Account '${name}' not found` };
-  }
-  writeAccounts(filtered);
-  return { ok: true };
-}
-
-/** ****************************************************************************
  * 앱 리소스 / 스크립트 경로
  ******************************************************************************/
 function getAppResourcePath(...segments) {
@@ -225,6 +180,11 @@ const BOT_DEFS = {
     key: "dc",
     label: "DCInside",
     runnerPath: getAppResourcePath("platforms", "dcinside", "runDcinside.js"),
+  },
+  thread: {
+    key: "thread",
+    label: "Thread",
+    runnerPath: getAppResourcePath("platforms", "thread", "runThread.js"),
   },
 };
 
@@ -343,6 +303,9 @@ function patchBotState(key, patch) {
 function inferRuntimeStatusFromLog(key, message) {
   const msg = String(message || "");
 
+  /** ------------------------------------------------------------------------
+   * Reddit
+   * ---------------------------------------------------------------------- */
   if (key === "reddit") {
     if (msg.includes("[runReddit] waiting for manual login")) {
       return "waiting_login";
@@ -358,6 +321,30 @@ function inferRuntimeStatusFromLog(key, message) {
     if (
       msg.includes("[runReddit] no comment job config, standby after login") ||
       msg.includes("[runReddit] entering post-run-standby")
+    ) {
+      return "standby";
+    }
+  }
+
+  /** ------------------------------------------------------------------------
+   * Thread
+   * ---------------------------------------------------------------------- */
+  if (key === "thread") {
+    if (msg.includes("[runThread] waiting for manual login")) {
+      return "waiting_login";
+    }
+
+    if (
+      msg.includes("[runThread] login detected") ||
+      msg.includes("[runThread] comment job starting")
+    ) {
+      return "running";
+    }
+
+    if (
+      msg.includes("[runThread] no comment job config, standby after login") ||
+      msg.includes("[runThread] comment job completed") ||
+      msg.includes("[runThread] entering post-run-standby")
     ) {
       return "standby";
     }
@@ -648,11 +635,9 @@ async function startBot(key, options = {}) {
     BOT_APP_NAME: app.getName(),
   };
 
-  if (options.account) {
-    env.BOT_USERNAME = options.account.username;
-    env.BOT_PASSWORD = options.account.password;
-  }
-
+  /** ------------------------------------------------------------------------
+   * Reddit 옵션
+   * ---------------------------------------------------------------------- */
   if (key === "reddit" && options.redditConfig) {
     const cfg = options.redditConfig;
     if (cfg.subreddit) env.REDDIT_TARGET_SUBREDDIT = cfg.subreddit;
@@ -662,6 +647,26 @@ async function startBot(key, options = {}) {
       env.REDDIT_TARGET_COMMENT_COUNT = String(cfg.commentCount);
     }
     if (cfg.commentText) env.REDDIT_TARGET_COMMENT_TEXT = cfg.commentText;
+  }
+
+  /** ------------------------------------------------------------------------
+   * Thread 옵션
+   * ---------------------------------------------------------------------- */
+  if (key === "thread" && options.threadConfig) {
+    const cfg = options.threadConfig;
+
+    if (cfg.keyword) env.THREAD_TARGET_KEYWORD = cfg.keyword;
+    if (cfg.dateRange) env.THREAD_TARGET_DATE_RANGE = cfg.dateRange;
+    if (cfg.commentText) env.THREAD_TARGET_COMMENT_TEXT = cfg.commentText;
+    if (cfg.searchOption) env.THREAD_SEARCH_OPTION = cfg.searchOption;
+
+    if (typeof cfg.commentCount !== "undefined") {
+      env.THREAD_TARGET_COMMENT_COUNT = String(cfg.commentCount);
+    }
+
+    if (typeof cfg.exploreMinutes !== "undefined") {
+      env.THREAD_TARGET_EXPLORE_MINUTES = String(cfg.exploreMinutes);
+    }
   }
 
   const child = utilityProcess.fork(def.runnerPath, [], {

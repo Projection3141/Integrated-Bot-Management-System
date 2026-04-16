@@ -64,7 +64,7 @@ async function enterSite({
   localeProfileKey = "kr",
   headless = false,
   viewport = { width: 1280, height: 900 },
-  useTempProfile = true,
+  useTempProfile = false, // true : 항상 임시 프로필 사용 / false : 기존 프로필 사용
 } = {}) {
   return openPage({
     url: targetUrl,
