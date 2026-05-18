@@ -201,7 +201,7 @@ async function clickFirstDcinsideResult(page, browser) {
     });
   });
 
-  await clickInFrame(page, 'a[href*="dcinside.com"]', { timeout: 10000 });
+  await clickInFrame(page, 'a[href*="`m.dcinside.com"]', { timeout: 10000 });
 
   const navPromise = page
     .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 })
@@ -248,7 +248,7 @@ async function loginDcinside(page, { id, pw } = {}) {
 
   await sleep(300);
 
-  const boxLinkSel = 'div.cpibox.btn_box a[href="https://dcinside.com"]';
+  const boxLinkSel = 'div.cpibox.btn_box a[href="https://m.dcinside.com"]';
   const boxLinkExists = await page.waitForSelector(boxLinkSel, { timeout: 5000 }).catch(() => null);
   if (boxLinkExists) {
     if (typeof boxLinkExists.dispose === "function") {

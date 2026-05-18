@@ -370,3 +370,47 @@ body {
 .log-line .lvl-system {
   color: #86efac;
 }
+
+.manual-content {
+  display: grid;
+  gap: 14px;
+}
+
+.manual-card {
+  padding: 16px;
+  border: 1px solid #2f3542;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.manual-card h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.manual-card ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.manual-card li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.manual-card p {
+  margin: 12px 0 0;
+  line-height: 1.6;
+}
+
+.manual-card code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}

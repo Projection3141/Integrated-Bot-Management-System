@@ -232,6 +232,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 1200,
+    icon: path.join(__dirname, "public", "assets", "IBMS.ico"),
     minWidth: 1100,
     minHeight: 960,
     autoHideMenuBar: true,
@@ -738,6 +739,8 @@ async function startBot(key, options = {}) {
 
   const env = {
     ...process.env,
+    NODE_NO_WARNINGS: "1",
+
     /* ELECTRON_RUN_AS_NODE: "1", */
     BOT_HEADLESS: options.headless ? "1" : "0",
     BOT_USER_DATA: getUserDataRoot(),

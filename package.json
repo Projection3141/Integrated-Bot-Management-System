@@ -1,14 +1,16 @@
 {
   "name": "integrated-bot-management-system",
-  "version": "1.0.1",
+  "version": "0.0.2",
   "private": true,
-  "description": "Multi platform automation bot for Reddit / Instagram / DCInside",
+  "description": "Multi platform automation bot for Reddit / Instagram / Thread / DCInside",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder",
+    "download:chrome": "npx @puppeteer/browsers install chrome@138.0.7204.168 --path ./vendor/chrome",
+    "build": "npm run download:chrome && electron-builder",
     "reddit": "node platforms/reddit/runReddit.js",
     "instagram": "node platforms/instagram/runInstagram.js",
+    "thread": "node platforms/thread/runThread.js",
     "dc": "node platforms/dcinside/runDcinside.js",
     "llm": "node test/llm/runLlm.js"
   },
@@ -22,8 +24,18 @@
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "vendor/chrome",
+        "to": "chrome",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/assets/IBMS.ico"
     },
     "mac": {
       "target": "dmg"

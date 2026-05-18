@@ -11,6 +11,7 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 
 const { ensureDir } = require("./helpers");
 const { gotoUrlSafe, waitForSelectorSafe } = require("./navigation");
+const { resolveChromePath } = require("./resolveChromePath");
 
 function attachFrameLifecycleDebug(page, opts = {}) {
   const tag = opts.tag || page.__botMeta?.tag || "page";
@@ -472,7 +473,10 @@ async function getBrowser(opts = {}) {
     ],
   });
 
+  const executablePath = resolveChromePath();
+  
   const browser = await puppeteerExtra.launch({
+    executablePath,
     headless,
     userDataDir,
     args,

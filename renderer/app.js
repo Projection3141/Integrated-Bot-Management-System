@@ -71,6 +71,10 @@ const botConfigEl = document.getElementById("bot-config");
 const historyPanelEl = document.getElementById("history-panel");
 const historyListEl = document.getElementById("history-list");
 const historyBackBtnEl = document.getElementById("history-back-btn");
+const manualBtnEl = document.getElementById("manual-btn");
+const manualPanelEl = document.getElementById("manual-panel");
+const manualContentEl = document.getElementById("manual-content");
+const manualBackBtnEl = document.getElementById("manual-back-btn");
 
 /** ****************************************************************************
  * 공통 helpers
@@ -1054,12 +1058,153 @@ function showHistory() {
     panel.classList.add("hidden");
   }
 
+  manualPanelEl.classList.add("hidden");
   historyPanelEl.classList.remove("hidden");
   loadHistory();
 }
 
 function hideHistory() {
   historyPanelEl.classList.add("hidden");
+
+  const panel = botGridEl.closest(".panel");
+  if (panel) {
+    panel.classList.remove("hidden");
+  }
+}
+
+/** ****************************************************************************
+ * 사용설명서
+ ******************************************************************************/
+function renderManual() {
+  /**
+   * 플랫폼별 입력값과 동작 흐름을 메인 화면에 표시한다.
+   * 실제 봇 실행 로직은 변경하지 않고, UI 설명만 담당한다.
+   */
+  manualContentEl.innerHTML = `
+    <div class="manual-card">
+      <h3>사용 전 환경설정</h3>
+
+      <ul>
+        <li>OpenAI API key 저장</li>
+        <li>1. window PowerShell 실행</li>
+        <li>2. 아래 명령어 복사-붙여넣기 후 실행</li>
+        <pre class="cmd">setx OPENAI_API_KEY "발급받은 API 키"</pre>
+        <li>3. 터미널 재실행 후 봇 실행 화면으로 돌아와 Start 클릭</li>
+      </ul>
+    </div>
+
+    <div class="manual-card">
+      <h3>공통 사용 방법</h3>
+
+      <ul>
+        <li><strong>적용 대상</strong>: 실행할 플랫폼을 선택합니다.</li>
+        <li><strong>창 없이 실행</strong>: 체크하면 브라우저 화면을 띄우지 않고 실행합니다.</li>
+        <li><strong>로그인 유지</strong>: 기존 로그인 세션을 재사용합니다.</li>
+        <li><strong>새 로그인 1회</strong>: 임시 세션으로 실행합니다. 종료 후 로그인 정보가 유지되지 않습니다.</li>
+        <li><strong>새 로그인 후 유지</strong>: 새로 로그인한 세션을 이후 실행에도 재사용합니다.</li>
+        <li><strong>Start</strong>: 선택된 플랫폼만 실행할 수 있습니다.</li>
+        <li><strong>Stop</strong>: 실행 중인 봇을 중지합니다.</li>
+      </ul>
+    </div>
+
+    <div class="manual-card">
+      <h3>Reddit</h3>
+
+      <ul>
+        <li><strong>커뮤니티</strong>: 검색할 subreddit 이름을 입력합니다. 예: <code>javascript</code></li>
+        <li><strong>키워드</strong>: 게시글 제목 기준으로 찾을 검색어를 입력합니다.</li>
+        <li><strong>날짜 범위</strong>: 지정하면 해당 기간의 게시글을 대상으로 필터링합니다.</li>
+        <li><strong>댓글 개수</strong>: 댓글을 작성할 최대 게시글 수입니다.</li>
+        <li><strong>댓글 언어</strong>: LLM이 생성할 댓글 언어를 선택합니다.</li>
+        <li><strong>추천 링크</strong>: 생성 댓글에 포함할 링크입니다.</li>
+      </ul>
+
+      <p>
+        실행하면 지정한 subreddit에서 키워드와 날짜 조건에 맞는 게시글을 찾고,
+        선택한 언어로 추천 링크가 포함된 댓글을 생성해 작성합니다.
+      </p>
+    </div>
+
+    <div class="manual-card">
+      <h3>Thread</h3>
+
+      <ul>
+        <li><strong>키워드</strong>: Thread 검색에 사용할 검색어를 입력합니다.</li>
+        <li><strong>검색 옵션</strong>: 인기 검색 또는 최근 검색 기준을 선택합니다.</li>
+        <li><strong>탐색 시간</strong>: 검색 결과를 탐색할 최대 시간을 분 단위로 입력합니다.</li>
+        <li><strong>댓글 개수</strong>: 댓글을 작성할 최대 게시글 수입니다.</li>
+        <li><strong>댓글 언어</strong>: LLM이 생성할 댓글 언어를 선택합니다.</li>
+        <li><strong>추천 링크</strong>: 생성 댓글에 포함할 링크입니다.</li>
+      </ul>
+
+      <p>
+        실행하면 키워드로 Thread 게시글을 탐색하고,
+        검색 옵션과 탐색 시간 안에서 조건에 맞는 게시글에 댓글을 작성합니다.
+      </p>
+    </div>
+
+    <div class="manual-card">
+      <h3>Instagram</h3>
+
+      <ul>
+        <li><strong>캡션</strong>: 업로드할 게시글 문구를 입력합니다.</li>
+        <li><strong>이미지 경로</strong>: 업로드할 로컬 이미지 파일 경로를 입력합니다.</li>
+      </ul>
+
+      <p>
+        실행하면 지정한 이미지 파일을 Instagram에 업로드하고,
+        입력한 캡션을 게시글 문구로 사용합니다.
+      </p>
+    </div>
+
+    <div class="manual-card">
+      <h3>DCInside</h3>
+
+      <ul>
+        <li><strong>갤러리</strong>: 입장할 DCInside 갤러리 이름을 입력합니다.</li>
+        <li><strong>키워드</strong>: 갤러리 안에서 검색할 키워드를 입력합니다.</li>
+        <li><strong>날짜 범위</strong>: 지정하면 해당 기간의 게시글을 대상으로 필터링합니다.</li>
+        <li><strong>댓글 개수</strong>: 댓글을 작성할 최대 게시글 수입니다.</li>
+        <li><strong>추천 링크</strong>: 댓글에 포함할 추천 링크입니다.</li>
+      </ul>
+
+      <p>
+        실행하면 먼저 갤러리를 검색해 입장한 뒤,
+        갤러리 내부 검색창에서 키워드를 검색하고 조건에 맞는 글에 댓글을 작성합니다.
+      </p>
+    </div>
+
+    <div class="manual-card">
+      <h3>실행 이력</h3>
+
+      <ul>
+        <li><strong>실행 조건</strong>: 실행 당시 입력했던 플랫폼별 설정을 확인할 수 있습니다.</li>
+        <li><strong>댓글 단 URL</strong>: 실제 댓글 작성이 완료된 게시글 URL을 확인할 수 있습니다.</li>
+      </ul>
+    </div>
+  `;
+}
+
+function showManual() {
+  /**
+   * 기존 메인 봇 카드 패널을 숨기고 사용설명서 패널을 표시한다.
+   * 실행 이력 패널이 열려 있으면 함께 닫는다.
+   */
+  const panel = botGridEl.closest(".panel");
+  if (panel) {
+    panel.classList.add("hidden");
+  }
+
+  historyPanelEl.classList.add("hidden");
+  manualPanelEl.classList.remove("hidden");
+  renderManual();
+}
+
+function hideManual() {
+  /**
+   * 사용설명서 패널을 닫고 기존 메인 봇 카드 패널을 다시 표시한다.
+   */
+  manualPanelEl.classList.add("hidden");
 
   const panel = botGridEl.closest(".panel");
   if (panel) {
@@ -1084,6 +1229,9 @@ async function init() {
 
   historyBtnEl.addEventListener("click", showHistory);
   historyBackBtnEl.addEventListener("click", hideHistory);
+
+  manualBtnEl.addEventListener("click", showManual);
+  manualBackBtnEl.addEventListener("click", hideManual);
 
   refreshBtnEl.addEventListener("click", async () => {
     await refreshBots();
