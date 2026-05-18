@@ -183,8 +183,9 @@ async function recreatePage(page, meta = {}) {
  * stale frame/handle 재사용 방지
  ******************************************************************************/
 
-function isLocatorSupported(target) {
-  return target && typeof target.locator === "function";
+function isLocatorSupported() {
+  //return target && typeof target.locator === "function";
+  return false; // Locator API는 아직 불안정해서 일단 비활성화. 추후 안정화되면 활용 고려
 }
 
 function getPageFromTarget(target) {

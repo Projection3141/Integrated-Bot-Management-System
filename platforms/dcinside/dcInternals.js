@@ -23,7 +23,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const { sleep } = require("../../core/helpers");
+const { sleep, setValue } = require("../../core/helpers");
 const { gotoUrlSafe, safeEvaluate, clickInFrame, fillInFrame } = require("../../core/navigation");
 
 /** ****************************************************************************
@@ -80,27 +80,59 @@ function formatKST_YYYY_MM_DD(d) {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-function parseYYMMDD(s) {
-  const m = String(s).match(/^(\d{2})\.(\d{2})\.(\d{2})$/);
-  if (!m) return null;
-  const yyyy = 2000 + Number(m[1]);
-  const mm = Number(m[2]);
-  const dd = Number(m[3]);
-  return kstMidnight(yyyy, mm, dd);
+/**
+ * 날짜 입력값을 KST 자정 Date로 변환한다.
+ *
+ * 지원:
+ *  - 26.02.09
+ *  - 2026.02.09
+ *  - 2026-02-09
+ */
+function parseDateInput(s) {
+  const raw = String(s || "").trim();
+  if (!raw) return null;
+
+  let m = raw.match(/^(\d{2})\.(\d{2})\.(\d{2})$/);
+  if (m) {
+    return kstMidnight(2000 + Number(m[1]), Number(m[2]), Number(m[3]));
+  }
+
+  m = raw.match(/^(\d{4})[.-](\d{2})[.-](\d{2})$/);
+  if (m) {
+    return kstMidnight(Number(m[1]), Number(m[2]), Number(m[3]));
+  }
+
+  return null;
 }
 
+/**
+ * 기존 함수명 호환용.
+ */
+function parseYYMMDD(s) {
+  return parseDateInput(s);
+}
+
+/**
+ * 날짜 범위를 파싱한다.
+ *
+ * 지원:
+ *  - 26.02.09~26.02.09
+ *  - 2026-02-09~2026-02-09
+ *  - 2026.02.09~2026.02.09
+ */
 function parseRange(rangeStr) {
   if (!rangeStr) return null;
 
   const cleaned = String(rangeStr)
     .replace(/\s+/g, "")
-    .replace(/[^\d.~]/g, "");
+    .replace(/[^\d.~/-]/g, "")
+    .replaceAll("/", ".");
 
   const parts = cleaned.split("~");
   if (parts.length !== 2) throw new Error(`date range format invalid: ${rangeStr}`);
 
-  const start = parseYYMMDD(parts[0]);
-  const end = parseYYMMDD(parts[1]);
+  const start = parseDateInput(parts[0]);
+  const end = parseDateInput(parts[1]);
 
   if (!start || !end) throw new Error(`date range parse failed: ${rangeStr}`);
 
@@ -147,16 +179,6 @@ function toPostDate(dateTimeRaw, now = new Date()) {
   return null;
 }
 
-/** ****************************************************************************
- * 네이버 검색창에 쿼리 입력
- ******************************************************************************/
-async function naverSearchWithGivenInput(page, query) {
-  await fillInFrame(page, "#MM_SEARCH_FAKE", "", { timeout: 20000, tag: "searchInputClear" });
-  await page.keyboard.type(query, { delay: 30 });
-  await page.keyboard.press("Enter");
-
-  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
-}
 
 /** ****************************************************************************
  * 네이버 결과에서 DCInside 첫 링크 클릭
@@ -165,7 +187,7 @@ async function clickFirstDcinsideResult(page, browser) {
   await page.waitForFunction(() => {
     const as = Array.from(document.querySelectorAll('a[href]'));
     return as.some((a) => (a.getAttribute("href") || "").includes("dcinside.com"));
-  }, { timeout: 25000 });
+  }, { timeout: 10000 });
 
   const popupPromise = new Promise((resolve) => page.once("popup", resolve));
   const targetCreatedPromise = new Promise((resolve) => {
@@ -179,10 +201,10 @@ async function clickFirstDcinsideResult(page, browser) {
     });
   });
 
-  await clickInFrame(page, 'a[href*="m.dcinside.com"], a[href*="dcinside.com"]', { timeout: 25000 });
+  await clickInFrame(page, 'a[href*="dcinside.com"]', { timeout: 10000 });
 
   const navPromise = page
-    .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 })
+    .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 })
     .then(() => page)
     .catch(() => null);
 
@@ -212,29 +234,29 @@ async function loginDcinside(page, { id, pw } = {}) {
   }
 
   await Promise.allSettled([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
-    clickInFrame(page, loginSelector, { timeout: 25000 }),
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }),
+    clickInFrame(page, loginSelector, { timeout: 10000 }),
   ]);
 
   await setValue(page, 'input#code[name="code"]', id);
   await setValue(page, 'input#password[name="password"]', pw);
 
   await Promise.allSettled([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }),
     page.keyboard.press("Enter"),
   ]);
 
   await sleep(300);
 
-  const boxLinkSel = 'div.cpibox.btn_box a[href="https://m.dcinside.com"]';
+  const boxLinkSel = 'div.cpibox.btn_box a[href="https://dcinside.com"]';
   const boxLinkExists = await page.waitForSelector(boxLinkSel, { timeout: 5000 }).catch(() => null);
   if (boxLinkExists) {
     if (typeof boxLinkExists.dispose === "function") {
       await boxLinkExists.dispose();
     }
     await Promise.allSettled([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {}),
-      clickInFrame(page, boxLinkSel, { timeout: 25000 }),
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }).catch(() => {}),
+      clickInFrame(page, boxLinkSel, { timeout: 10000 }),
     ]);
   }
 
@@ -242,7 +264,11 @@ async function loginDcinside(page, { id, pw } = {}) {
 }
 
 /** ****************************************************************************
- * 검색 수행
+ * 갤러리 검색 수행
+ *
+ * 역할:
+ *  - DC 메인/검색 화면에서 갤러리명을 검색한다.
+ *  - enterGallary()가 이 함수를 사용한다.
  ******************************************************************************/
 async function searchGallary(page, keyword) {
   if (!page) throw new Error("searchGallary: page is required");
@@ -253,19 +279,192 @@ async function searchGallary(page, keyword) {
   const submitBtnSel = "button.sp-btn-sch, .search-box button.sp-btn-sch";
 
   await page.waitForSelector(searchAllInputSel, { timeout: 20000 });
-  await setValue(page, searchAllInputSel, keyword);
+
+  await fillInFrame(page, searchAllInputSel, keyword, {
+    timeout: 20000,
+    tag: "dc.gallerySearchInput",
+  });
 
   await page.waitForSelector(submitBtnSel, { timeout: 20000 });
 
   const before = page.url();
+
   await Promise.allSettled([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }),
-    clickInFrame(page, submitBtnSel, { timeout: 25000 }),
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }),
+    clickInFrame(page, submitBtnSel, {
+      timeout: 10000,
+      tag: "dc.gallerySearchSubmit",
+    }),
   ]);
 
   if (page.url() === before) {
     await page.keyboard.press("Enter");
-    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+    await page.waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: 10000,
+    }).catch(() => {});
+  }
+
+  await sleep(200);
+  return page;
+}
+
+/** ****************************************************************************
+ * 갤러리 내부 게시글 키워드 검색
+ *
+ * 대상:
+ *  - 두 번째 이미지의 inner search
+ *  - div.con-search-box form 내부 input#serval[name="serval"]
+ *
+ * 핵심:
+ *  - 상단 통합검색 form#topsearch_form은 제외한다.
+ *  - input#serval이 들어있는 form을 먼저 찾는다.
+ *  - submit button도 해당 form 내부에서만 찾는다.
+ *  - Enter fallback은 쓰지 않는다.
+ ******************************************************************************/
+async function searchKeywordInGallery(page, keyword) {
+  if (!page) throw new Error("searchKeywordInGallery: page is required");
+  if (!keyword) throw new Error("searchKeywordInGallery: keyword is required");
+
+  const value = String(keyword || "").trim();
+
+  if (!value) {
+    throw new Error("searchKeywordInGallery: keyword is empty");
+  }
+
+  await page.waitForSelector("div.con-search-box input#serval[name='serval']", {
+    timeout: 20000,
+  });
+
+  const before = page.url();
+
+  const submitResult = await safeEvaluate(
+    page,
+    (nextValue) => {
+      /**
+       * 1) 갤러리 내부 검색 input만 찾는다.
+       *    상단 통합검색 input[name="search_gall"]은 절대 대상이 아니다.
+       */
+      const input =
+        document.querySelector("div.con-search-box input#serval[name='serval']") ||
+        document.querySelector("form[action*='/board/'] input#serval[name='serval']") ||
+        document.querySelector("form[action*='/mgallery/'] input#serval[name='serval']") ||
+        document.querySelector("form[action*='/mini/'] input#serval[name='serval']");
+
+      if (!input) {
+        return {
+          ok: false,
+          reason: "NO_INNER_SEARCH_INPUT",
+        };
+      }
+
+      /**
+       * 2) input이 속한 form을 기준으로 submit button을 찾는다.
+       *    이렇게 해야 form#topsearch_form의 통합검색 버튼을 누르지 않는다.
+       */
+      const form = input.closest("form");
+
+      if (!form) {
+        return {
+          ok: false,
+          reason: "NO_INNER_SEARCH_FORM",
+        };
+      }
+
+      if (form.id === "topsearch_form") {
+        return {
+          ok: false,
+          reason: "WRONG_FORM_TOP_SEARCH",
+        };
+      }
+
+      const button =
+        form.querySelector("button.sp-btn-sch[type='submit']") ||
+        form.querySelector("button[type='submit']");
+
+      if (!button) {
+        return {
+          ok: false,
+          reason: "NO_INNER_SEARCH_SUBMIT",
+          formAction: form.getAttribute("action") || "",
+        };
+      }
+
+      /**
+       * 3) 실제 DOM value에 키워드를 직접 주입한다.
+       *    DC의 search_list_form()이 input.value를 읽기 때문에
+       *    키보드 입력보다 value 직접 세팅이 안정적이다.
+       */
+      input.focus();
+      input.value = String(nextValue || "");
+
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keyup", {
+        bubbles: true,
+        key: "A",
+      }));
+
+      const confirmedValue = String(input.value || "").trim();
+
+      if (!confirmedValue) {
+        return {
+          ok: false,
+          reason: "EMPTY_VALUE_AFTER_SET",
+        };
+      }
+
+      /**
+       * 4) 같은 form 내부 버튼만 클릭한다.
+       */
+      try {
+        button.scrollIntoView({
+          block: "center",
+          inline: "center",
+        });
+      } catch {
+        /** ignore */
+      }
+
+      button.click();
+
+      return {
+        ok: true,
+        value: confirmedValue,
+        formId: form.id || "",
+        formAction: form.getAttribute("action") || "",
+        buttonClass: button.className || "",
+      };
+    },
+    value,
+    {
+      tag: "dc.keywordSearchSubmitInner",
+    },
+  );
+
+  if (!submitResult?.ok) {
+    throw new Error(
+      `searchKeywordInGallery: submit failed ${submitResult?.reason || ""}`
+    );
+  }
+
+  await page.waitForNavigation({
+    waitUntil: "domcontentloaded",
+    timeout: 10000,
+  }).catch(() => {});
+
+  /**
+   * Enter fallback 금지.
+   * Enter를 누르면 상단 통합검색이 다시 가로챌 수 있다.
+   */
+  if (page.url() === before) {
+    await sleep(500);
+
+    if (page.url() === before) {
+      throw new Error(
+        `searchKeywordInGallery: search did not navigate form=${submitResult.formId} action=${submitResult.formAction}`
+      );
+    }
   }
 
   await sleep(200);
@@ -277,14 +476,14 @@ async function searchGallary(page, keyword) {
  ******************************************************************************/
 async function clickFirstGalleryFromResult(page) {
   const firstLinkSel = "ul.flex-gall-lst > li:first-child a[href]";
-  await page.waitForSelector(firstLinkSel, { timeout: 25000 });
+  await page.waitForSelector(firstLinkSel, { timeout: 10000 });
 
   const popupPromise = new Promise((resolve) => page.once("popup", resolve));
 
-  await clickInFrame(page, firstLinkSel, { timeout: 25000 });
+  await clickInFrame(page, firstLinkSel, { timeout: 10000 });
 
   const navPromise = page
-    .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 25000 })
+    .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 })
     .then(() => page)
     .catch(() => null);
 
@@ -341,6 +540,86 @@ async function movePage(page, pageNum) {
   console.log(`[dc][movePage] moved to page=${pageNum} url=${next}`);
 
   return page;
+}
+
+/**
+ * 현재 목록 화면에서 댓글 대상 후보 글을 추출한다.
+ *
+ * 역할:
+ *  - crawlGallary의 DOM 추출 방식만 분리
+ *  - 파일 저장/페이지 반복은 하지 않는다.
+ *  - 댓글 작성용 runner에서 가볍게 사용한다.
+ */
+async function extractGallaryPostItems(page, { keyword, limit = 50 } = {}) {
+  if (!page) throw new Error("extractGallaryPostItems: page is required");
+  if (!keyword) throw new Error("extractGallaryPostItems: keyword is required");
+
+  await page.waitForSelector("body", { timeout: 20000 });
+  await sleep(300);
+
+  return safeEvaluate(
+    page,
+    ({ keyword: kwArg, limit: itemLimit }) => {
+      const kw = String(kwArg || "").toLowerCase();
+      const pickText = (el) => (el?.textContent || el?.innerText || "").trim();
+
+      const normHref = (href) => {
+        try {
+          return new URL(href, location.href).href;
+        } catch {
+          return String(href || "");
+        }
+      };
+
+      const rows = Array.from(document.querySelectorAll("div.gall-detail-lnktb"));
+      const out = [];
+
+      for (const row of rows) {
+        const a = row.querySelector(
+          'a[href*="/board/"], a[href*="/mgallery/"], a[href*="/mini/"], a[href]',
+        );
+
+        if (!a) continue;
+
+        const url = normHref(a.getAttribute("href") || a.href || "");
+        if (!url) continue;
+        if (!url.includes("/board/") && !url.includes("/mgallery/") && !url.includes("/mini/")) {
+          continue;
+        }
+
+        const titleEl = row.querySelector(".subjectin") || row.querySelector(".subject");
+        const title = pickText(titleEl);
+
+        if (!title) continue;
+        if (!title.toLowerCase().includes(kw)) continue;
+
+        const infoLis = Array.from(row.querySelectorAll("ul.ginfo > li"));
+        const info = infoLis.map((li) => pickText(li));
+
+        out.push({
+          title,
+          url,
+          tab: info[0] || null,
+          user: info[1] || null,
+          dateTime: info[2] || null,
+          views: info[3] || null,
+          upAdd: info[4] || null,
+          source: "gall-detail-lnktb",
+        });
+
+        if (out.length >= itemLimit) break;
+      }
+
+      return out;
+    },
+    {
+      keyword,
+      limit,
+    },
+    {
+      tag: "dc.extractGallaryPostItems",
+    },
+  );
 }
 
 /** ****************************************************************************
@@ -585,6 +864,8 @@ async function writeComment(page, text) {
     clickInFrame(page, submitSel, { timeout: 15000 }),
   ]);
 
+  console.log(`[dc][writeComment] submit attempted`);
+
   if (page.url() === beforeUrl) {
     await page.waitForFunction(
       (sel) => {
@@ -600,15 +881,19 @@ async function writeComment(page, text) {
 }
 
 module.exports = {
-  naverSearchWithGivenInput,
-  clickFirstDcinsideResult,
   loginDcinside,
 
   searchGallary,
+  searchKeywordInGallery,
   clickFirstGalleryFromResult,
 
+  extractGallaryPostItems,
   crawlGallary,
   writeComment,
+
+  parseRange,
+  toPostDate,
+  formatKST_YYYY_MM_DD,
 
   toURL,
   toHref,

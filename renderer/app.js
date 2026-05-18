@@ -45,6 +45,15 @@ const state = {
       imagePath: "public\\assets\\image\\cat.jpg",
       userDataDirMode: "persistent",
     },
+
+    dc: {
+      dateRange: "",
+      gallery: "",
+      keyword: "",
+      commentCount: 1,
+      recommendLink: "http://monio.co.kr/",
+      userDataDirMode: "persistent",
+    },
   },
 };
 
@@ -363,6 +372,69 @@ function renderBotConfig() {
         </select>
       </div>
     </div>
+
+    <div id="dc-config" class="${state.config.target !== "dc" ? "hidden" : ""}">
+      <div class="bot-config-row">
+        <label for="dc-date-range">날짜 범위 (YYYY-MM-DD~YYYY-MM-DD)</label>
+        <input
+          id="dc-date-range"
+          placeholder="2026-03-01~2026-03-10"
+          value="${escapeHtml(state.config.dc.dateRange)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="dc-gallery">갤러리</label>
+        <input
+          id="dc-gallery"
+          placeholder="고양이"
+          value="${escapeHtml(state.config.dc.gallery)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="dc-keyword">키워드</label>
+        <input
+          id="dc-keyword"
+          placeholder="검색 키워드"
+          value="${escapeHtml(state.config.dc.keyword)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="dc-comment-count">댓글 개수</label>
+        <input
+          id="dc-comment-count"
+          type="number"
+          min="1"
+          value="${state.config.dc.commentCount}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="dc-recommend-link">추천 링크</label>
+        <input
+          id="dc-recommend-link"
+          placeholder="http://monio.co.kr/"
+          value="${escapeHtml(state.config.dc.recommendLink)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="dc-user-data-dir-mode">로그인 방식</label>
+        <select id="dc-user-data-dir-mode" class="select">
+          <option value="persistent" ${state.config.dc.userDataDirMode === "persistent" ? "selected" : ""}>
+            로그인 유지
+          </option>
+          <option value="temp" ${state.config.dc.userDataDirMode === "temp" ? "selected" : ""}>
+            새 로그인 1회
+          </option>
+          <option value="promote" ${state.config.dc.userDataDirMode === "promote" ? "selected" : ""}>
+            새 로그인 후 유지
+          </option>
+        </select>
+      </div>
+    </div>
   `;
 }
 
@@ -378,6 +450,7 @@ function updateBotConfigUI() {
   const redditConfig = document.getElementById("reddit-config");
   const threadConfig = document.getElementById("thread-config");
   const instagramConfig = document.getElementById("instagram-config");
+  const dcConfig = document.getElementById("dc-config");
 
   if (targetSelect) {
     targetSelect.value = state.config.target;
@@ -440,6 +513,26 @@ function updateBotConfigUI() {
     if (imagePath) imagePath.value = state.config.instagram.imagePath;
     if (instagramUserDataDirMode) {
       instagramUserDataDirMode.value = normalizeUserDataDirMode(state.config.instagram.userDataDirMode);
+    }
+  }
+
+  if (dcConfig) {
+    dcConfig.classList.toggle("hidden", state.config.target !== "dc");
+
+    const dateRange = document.getElementById("dc-date-range");
+    const gallery = document.getElementById("dc-gallery");
+    const keyword = document.getElementById("dc-keyword");
+    const commentCount = document.getElementById("dc-comment-count");
+    const recommendLink = document.getElementById("dc-recommend-link");
+    const dcUserDataDirMode = document.getElementById("dc-user-data-dir-mode");
+
+    if (dateRange) dateRange.value = state.config.dc.dateRange;
+    if (gallery) gallery.value = state.config.dc.gallery;
+    if (keyword) keyword.value = state.config.dc.keyword;
+    if (commentCount) commentCount.value = state.config.dc.commentCount;
+    if (recommendLink) recommendLink.value = state.config.dc.recommendLink;
+    if (dcUserDataDirMode) {
+      dcUserDataDirMode.value = normalizeUserDataDirMode(state.config.dc.userDataDirMode);
     }
   }
 }
@@ -560,6 +653,39 @@ function handleBotConfigInput(event) {
 
   if (id === "instagram-user-data-dir-mode") {
     state.config.instagram.userDataDirMode = normalizeUserDataDirMode(value);
+    return;
+  }
+
+  /** --------------------------------------------------------------------------
+ * DCInside 설정
+ * ----------------------------------------------------------------------- */
+  if (id === "dc-date-range") {
+    state.config.dc.dateRange = value;
+    return;
+  }
+
+  if (id === "dc-gallery") {
+    state.config.dc.gallery = value;
+    return;
+  }
+
+  if (id === "dc-keyword") {
+    state.config.dc.keyword = value;
+    return;
+  }
+
+  if (id === "dc-comment-count") {
+    state.config.dc.commentCount = toSafeNumber(value, 0);
+    return;
+  }
+
+  if (id === "dc-recommend-link") {
+    state.config.dc.recommendLink = value;
+    return;
+  }
+
+  if (id === "dc-user-data-dir-mode") {
+    state.config.dc.userDataDirMode = normalizeUserDataDirMode(value);
     return;
   }
 }
@@ -728,6 +854,25 @@ function validateBotConfig(key) {
     return { ok: true };
   }
 
+  if (key === "dc") {
+    const cfg = state.config.dc;
+
+    if (
+      !cfg.gallery ||
+      !cfg.keyword ||
+      !cfg.recommendLink ||
+      !isPositiveNumber(cfg.commentCount)
+    ) {
+      return {
+        ok: false,
+        message:
+          "DCInside 설정이 불완전합니다. 갤러리, 키워드, 댓글 개수, 추천 링크를 모두 입력해 주세요.",
+      };
+    }
+
+    return { ok: true };
+  }
+
   return { ok: true };
 }
 
@@ -764,6 +909,18 @@ function buildStartOptions(key) {
 
     options.instagramConfig = {
       ...state.config.instagram,
+    };
+
+    return options;
+  }
+
+  if (key === "dc") {
+    options.userDataDirMode = normalizeUserDataDirMode(
+      state.config.dc.userDataDirMode,
+    );
+
+    options.dcConfig = {
+      ...state.config.dc,
     };
 
     return options;
@@ -843,6 +1000,7 @@ function renderHistory(history = []) {
       const meta = [];
 
       if (config.subreddit) meta.push(`subreddit: ${escapeHtml(config.subreddit)}`);
+      if (config.gallery) meta.push(`gallery: ${escapeHtml(config.gallery)}`);
       if (config.keyword) meta.push(`keyword: ${escapeHtml(config.keyword)}`);
       if (config.dateRange) meta.push(`dateRange: ${escapeHtml(config.dateRange)}`);
       if (typeof config.count !== "undefined") meta.push(`count: ${escapeHtml(String(config.count))}`);
@@ -866,7 +1024,7 @@ function renderHistory(history = []) {
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
             <div>
-              ${target === "reddit" || target === "thread"
+              ${target === "reddit" || target === "thread" || target === "dc"
           ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
           : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
         }

@@ -354,6 +354,9 @@ function inferRuntimeStatusFromLog(key, message) {
     }
   }
 
+  /** ------------------------------------------------------------------------
+   * Instagram
+   * ---------------------------------------------------------------------- */
   if (key === "instagram") {
     if (msg.includes("[runInstagram] waiting for manual login")) {
       return "waiting_login";
@@ -371,6 +374,30 @@ function inferRuntimeStatusFromLog(key, message) {
     if (
       msg.includes("[runInstagram] ✅ done") ||
       msg.includes("[runInstagram] entering post-run-standby")
+    ) {
+      return "standby";
+    }
+  }
+
+  /** ------------------------------------------------------------------------
+   * DCInside
+   * ---------------------------------------------------------------------- */
+  if (key === "dc") {
+    if (msg.includes("[runDcinside] waiting for manual login")) {
+      return "waiting_login";
+    }
+
+    if (
+      msg.includes("[runDcinside] login detected") ||
+      msg.includes("[runDcinside] comment job starting")
+    ) {
+      return "running";
+    }
+
+    if (
+      msg.includes("[runDcinside] no comment job config, standby after login") ||
+      msg.includes("[runDcinside] comment job completed") ||
+      msg.includes("[runDcinside] entering post-run-standby")
     ) {
       return "standby";
     }
@@ -767,6 +794,28 @@ async function startBot(key, options = {}) {
 
     if (cfg.caption) env.INSTA_CAPTION = cfg.caption;
     if (cfg.imagePath) env.INSTA_IMAGE_PATH = cfg.imagePath;
+  }
+
+  /** ------------------------------------------------------------------------
+  * DCInside 옵션
+  * ---------------------------------------------------------------------- */
+  if (key === "dc" && options.dcConfig) {
+    const cfg = options.dcConfig;
+
+    if (cfg.gallery) env.DC_TARGET_GALLERY = cfg.gallery;
+    if (cfg.keyword) env.DC_TARGET_KEYWORD = cfg.keyword;
+    if (cfg.dateRange) env.DC_TARGET_DATE_RANGE = cfg.dateRange;
+    if (cfg.recommendLink) env.DC_RECOMMEND_LINK = cfg.recommendLink;
+
+    if (typeof cfg.commentCount !== "undefined") {
+      env.DC_TARGET_COMMENT_COUNT = String(cfg.commentCount);
+    }
+
+    /**
+     * DC는 기본 한국어 댓글.
+     * UI에 언어 선택을 추가하지 않는 한 ko로 동작한다.
+     */
+    env.DC_COMMENT_LANGUAGE = cfg.commentLanguage || "ko";
   }
 
   const child = utilityProcess.fork(def.runnerPath, [], {

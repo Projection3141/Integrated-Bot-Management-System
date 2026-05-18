@@ -268,12 +268,21 @@ async function waitForStandby(tag = "standby") {
   console.log(`[runReddit] leaving ${tag}`);
 }
 
+/**
+ * 객체를 한 줄 로그 문자열로 변환한다.
+ */
+function toOneLineLog(obj) {
+  return Object.entries(obj)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(" ");
+}
+
 /** ****************************************************************************
  * Reddit runner
  ******************************************************************************/
 async function runReddit() {
   console.log("[runReddit] runner started");
-  console.log("[runReddit] config:", getRunSummary());
+  console.log("[runReddit] config:", toOneLineLog(getRunSummary()));
 
   bindShutdownSignals();
 

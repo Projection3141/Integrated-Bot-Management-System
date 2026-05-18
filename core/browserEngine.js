@@ -334,7 +334,7 @@ async function applyPageContext(page, opts = {}) {
     } catch { }
   }
 
-  attachFrameLifecycleDebug(page, { tag, cdp: opts.debugLifecycleCdp });
+  // attachFrameLifecycleDebug(page, { tag, cdp: opts.debugLifecycleCdp });
   page.on("error", (err) => console.log(`[bot][${tag}:error]`, err?.message || err));
   page.on("pageerror", (err) => console.log(`[bot][${tag}:pageerror]`, err?.message || err));
 

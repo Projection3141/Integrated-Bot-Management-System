@@ -138,6 +138,9 @@ async function createRedditCommentRecommendingLink({
   });
 }
 
+/**
+ * Threads 게시글 텍스트 기반 링크 추천 댓글 생성
+ */
 async function createThreadCommentRecommendingLink({
   postText,
   link = DEFAULT_RECOMMEND_LINK,
@@ -153,7 +156,33 @@ async function createThreadCommentRecommendingLink({
   });
 }
 
+/**
+ * DCInside 게시글 title 기반 링크 추천 댓글 생성
+ *
+ * 입력:
+ *  - gallery: 갤러리명
+ *  - title: 게시글 제목
+ *  - link: 추천 링크
+ *  - language: 댓글 언어, 기본 ko
+ */
+async function createDcinsideCommentRecommendingLink({
+  gallery = "",
+  title,
+  link = DEFAULT_RECOMMEND_LINK,
+  language = "ko",
+} = {}) {
+  return createPlatformCommentRecommendingLink({
+    platformName: "DCInside",
+    communityLabel: "Gallery",
+    communityValue: gallery,
+    title,
+    link,
+    language,
+  });
+}
+
 module.exports = {
   createRedditCommentRecommendingLink,
   createThreadCommentRecommendingLink,
+  createDcinsideCommentRecommendingLink,
 };

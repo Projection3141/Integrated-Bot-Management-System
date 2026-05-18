@@ -231,12 +231,21 @@ async function waitForStandby(tag = "standby") {
   console.log(`[runThread] leaving ${tag}`);
 }
 
+/**
+ * 객체를 한 줄 로그 문자열로 변환한다.
+ */
+function toOneLineLog(obj) {
+  return Object.entries(obj)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(" ");
+}
+
 /** ****************************************************************************
  * Threads runner
  ******************************************************************************/
 async function runThread() {
   console.log("[runThread] runner started");
-  console.log(`[runThread] config ${getRunSummaryLine()}`);
+  console.log(`[runThread] config: ${toOneLineLog(getRunSummary())}`);
 
   bindShutdownSignals();
 
