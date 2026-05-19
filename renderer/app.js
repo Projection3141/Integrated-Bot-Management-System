@@ -354,11 +354,20 @@ function renderBotConfig() {
 
       <div class="bot-config-row">
         <label for="instagram-image-path">이미지 경로</label>
-        <input
-          id="instagram-image-path"
-          placeholder="public\\assets\\image\\cat.jpg"
-          value="${escapeHtml(state.config.instagram.imagePath)}"
-        />
+        <div style="display:flex; gap:8px;">
+          <input
+            id="instagram-image-path"
+            placeholder="C:\\Users\\user\\Pictures\\cat.jpg"
+            value="${escapeHtml(state.config.instagram.imagePath)}"
+          />
+          <button
+            type="button"
+            class="btn"
+            id="instagram-image-pick-btn"
+          >
+            파일 선택
+          </button>
+        </div>
       </div>
 
       <div class="bot-config-row">
@@ -695,6 +704,34 @@ function handleBotConfigInput(event) {
 }
 
 /** ****************************************************************************
+ * bot 설정 버튼 처리
+ ******************************************************************************/
+async function handleBotConfigClick(event) {
+  const pickBtn = event.target.closest("#instagram-image-pick-btn");
+  if (!pickBtn) return;
+
+  if (!window.botAPI?.pickImageFile) {
+    pushUiLog("instagram", "error", "이미지 파일 선택 API가 preload에 연결되지 않았습니다.");
+    return;
+  }
+
+  const result = await window.botAPI.pickImageFile();
+
+  if (!result?.ok || !result.filePath) {
+    return;
+  }
+
+  state.config.instagram.imagePath = result.filePath;
+
+  const input = document.getElementById("instagram-image-path");
+  if (input) {
+    input.value = result.filePath;
+  }
+
+  pushUiLog("instagram", "system", `[renderer] image selected: ${result.filePath}`);
+}
+
+/** ****************************************************************************
  * 상태 helpers
  ******************************************************************************/
 function getBadgeClass(status) {
@@ -858,6 +895,25 @@ function validateBotConfig(key) {
     return { ok: true };
   }
 
+  /** --------------------------------------------------------------------------
+   * Instagram
+   * ----------------------------------------------------------------------- */
+  if (key === "instagram") {
+    const cfg = state.config.instagram;
+
+    if (!cfg.caption || !cfg.imagePath) {
+      return {
+        ok: false,
+        message: "Instagram 설정이 불완전합니다. 캡션과 이미지 경로를 모두 입력해 주세요.",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  /** --------------------------------------------------------------------------
+   * dcinside
+   * ----------------------------------------------------------------------- */
   if (key === "dc") {
     const cfg = state.config.dc;
 
@@ -1224,6 +1280,7 @@ async function init() {
 
   botConfigEl.addEventListener("input", handleBotConfigInput);
   botConfigEl.addEventListener("change", handleBotConfigInput);
+  botConfigEl.addEventListener("click", handleBotConfigClick);
 
   botGridEl.addEventListener("click", handleBotActionClick);
 

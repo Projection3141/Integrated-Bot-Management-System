@@ -43,7 +43,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
-const { app, BrowserWindow, ipcMain, utilityProcess, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, utilityProcess, Menu, dialog } = require("electron");
 const { exec } = require("child_process");
 
 /** ****************************************************************************
@@ -151,6 +151,29 @@ function getAppResourcePath(...segments) {
   }
 
   return path.join(__dirname, ...segments);
+}
+
+/** ****************************************************************************
+ * Instagram 이미지 경로 정규화
+ *
+ * 역할:
+ *  - 사용자가 파일 선택으로 고른 절대경로는 그대로 사용
+ *  - public\assets\image\cat.jpg 같은 상대경로는 앱 리소스 기준으로 보정
+ ******************************************************************************/
+function resolveInstagramImagePath(inputPath) {
+  const raw = String(inputPath || "").trim();
+  if (!raw) return "";
+
+  if (path.isAbsolute(raw)) {
+    return path.normalize(raw);
+  }
+
+  return getAppResourcePath(
+    ...raw
+      .split(/[\\/]+/g)
+      .map((part) => part.trim())
+      .filter(Boolean),
+  );
 }
 
 /** ****************************************************************************
@@ -795,8 +818,13 @@ async function startBot(key, options = {}) {
   if (key === "instagram" && options.instagramConfig) {
     const cfg = options.instagramConfig;
 
-    if (cfg.caption) env.INSTA_CAPTION = cfg.caption;
-    if (cfg.imagePath) env.INSTA_IMAGE_PATH = cfg.imagePath;
+    if (typeof cfg.caption !== "undefined") {
+      env.INSTA_CAPTION = String(cfg.caption || "");
+    }
+
+    if (cfg.imagePath) {
+      env.INSTA_IMAGE_PATH = resolveInstagramImagePath(cfg.imagePath);
+    }
   }
 
   /** ------------------------------------------------------------------------
@@ -989,6 +1017,35 @@ function registerIpc() {
 
   ipcMain.handle("account:remove", async (_event, name) => {
     return removeAccount(name);
+  });
+
+  ipcMain.handle("dialog:pickImage", async () => {
+    const win = getMainWindow();
+
+    const result = await dialog.showOpenDialog(win, {
+      title: "Instagram에 업로드할 이미지 선택",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Images",
+          extensions: ["jpg", "jpeg", "png", "webp"],
+        },
+      ],
+    });
+
+    if (result.canceled || !result.filePaths?.[0]) {
+      return {
+        ok: false,
+        canceled: true,
+        filePath: "",
+      };
+    }
+
+    return {
+      ok: true,
+      canceled: false,
+      filePath: result.filePaths[0],
+    };
   });
 }
 

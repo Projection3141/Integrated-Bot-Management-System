@@ -54,4 +54,6 @@ contextBridge.exposeInMainWorld("botAPI", {
   /** 실행 이력 가져오기 */
   getHistory: () => ipcRenderer.invoke("bot:getHistory"),
 
+  pickImageFile: () => ipcRenderer.invoke("dialog:pickImage"),
+
 });

@@ -62,6 +62,8 @@ async function runInstagram() {
   const caption = process.env.INSTA_CAPTION || "테스트 업로드";
   const imagePath = process.env.INSTA_IMAGE_PATH || path.normalize("public\\assets\\image\\cat.jpg");
 
+  console.log("[runInstagram] imagePath:", imagePath);
+
   let opened = null;
   let page = null;
 
