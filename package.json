@@ -1,6 +1,6 @@
 {
   "name": "integrated-bot-management-system",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Multi platform automation bot for Reddit / Instagram / Thread / DCInside",
   "main": "main.js",

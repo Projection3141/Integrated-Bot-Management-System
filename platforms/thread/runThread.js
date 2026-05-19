@@ -142,7 +142,7 @@ function hasCommentJobConfig() {
 /** ****************************************************************************
  * 로그용 실행 요약
  ******************************************************************************/
-function getRunSummaryLine() {
+function getRunSummary() {
   return [
     `userDataRoot=${USER_DATA_ROOT}`,
     `userDataDirMode=${USER_DATA_DIR_MODE}`,
